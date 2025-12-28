@@ -1289,6 +1289,7 @@ class TaskDatabase:
                 """
                 INSERT INTO session_quality_checks (
                     session_id,
+                    check_type,
                     check_version,
                     overall_rating,
                     playwright_count,
@@ -1300,10 +1301,10 @@ class TaskDatabase:
                     warnings,
                     metrics
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 RETURNING id
                 """,
-                session_id, check_version, overall_rating,
+                session_id, 'quick', check_version, overall_rating,
                 playwright_count, playwright_screenshot_count, total_tool_uses,
                 error_count, error_rate,
                 json.dumps(critical_issues), json.dumps(warnings), json.dumps(metrics)
@@ -1372,44 +1373,6 @@ class TaskDatabase:
                 json.dumps(prompt_improvements),
                 model
             )
-
-            # Also store a quick check if one doesn't exist for this session
-            # (deep reviews still benefit from having the metrics stored)
-            existing_check = await conn.fetchval(
-                "SELECT id FROM session_quality_checks WHERE session_id = $1",
-                session_id
-            )
-
-            if not existing_check:
-                # Extract key metrics for indexed columns
-                playwright_count = metrics.get('playwright_count', 0)
-                playwright_screenshot_count = metrics.get('playwright_screenshot_count', 0)
-                total_tool_uses = metrics.get('total_tool_uses', 0)
-                error_count = metrics.get('error_count', 0)
-                error_rate = metrics.get('error_rate', 0.0)
-
-                await conn.execute(
-                    """
-                    INSERT INTO session_quality_checks (
-                        session_id,
-                        check_version,
-                        overall_rating,
-                        playwright_count,
-                        playwright_screenshot_count,
-                        total_tool_uses,
-                        error_count,
-                        error_rate,
-                        critical_issues,
-                        warnings,
-                        metrics
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                    """,
-                    session_id, "1.0", overall_rating,
-                    playwright_count, playwright_screenshot_count, total_tool_uses,
-                    error_count, error_rate,
-                    json.dumps([]), json.dumps([]), json.dumps(metrics)  # Empty critical_issues and warnings
-                )
 
             return review_id
 
