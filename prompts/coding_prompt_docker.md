@@ -4,13 +4,19 @@
 
 ## ⚠️ MOST IMPORTANT RULES (Read First!)
 
-**1. NEVER create files using bash commands:**
-- ❌ `cat > file.js << 'EOF'` → **FAILS** in docker exec (heredoc escaping)
-- ❌ `echo "content" > file.js` → **FAILS** (quote/newline escaping)
+**1. NEVER create files using bash commands (THIS ALWAYS FAILS IN DOCKER):**
+- ❌ `cat > file.js << 'EOF'` → **FAILS 100% OF THE TIME** in docker exec (heredoc escaping broken)
+- ❌ `echo "content" > file.js` → **FAILS** (quote/newline escaping broken)
 - ❌ Base64, python, or shell script workarounds → **ALL FAIL**
-- ✅ **ONLY use Write tool** for creating files
+- ✅ **ONLY use Write tool** for creating files - NO EXCEPTIONS!
 
-**2. Volume mount sync is INSTANT:**
+**2. File extensions matter (package.json has "type": "module"):**
+- ✅ Use `.cjs` extension for CommonJS files (require/module.exports)
+- ✅ Use `.mjs` or `.js` for ES modules (import/export)
+- ❌ WRONG: `verify_task.js` with `require()` → Error: require not defined
+- ✅ CORRECT: `verify_task.cjs` with `require()` → Works!
+
+**3. Volume mount sync is INSTANT:**
 - Write tool creates file on host → appears in container immediately
 - No need to "wait for sync" or check with ls
 - Trust the volume mount - it works!
@@ -252,29 +258,39 @@ bash_docker({ command: "for i in {1..15}; do curl -s http://localhost:5173 > /de
 
 ## ❌ COMMON MISTAKES - DO NOT DO THIS
 
-### Mistake 1: Trying to create files with bash heredoc
+### Mistake 1: Trying to create files with bash heredoc (MOST COMMON ERROR!)
 
 ```bash
-# ❌ WRONG - This FAILS in docker exec
+# ❌ WRONG - This ALWAYS FAILS in docker exec
 bash_docker({
-  command: "cat > server/index.js << 'EOF'\nimport express from 'express';\nEOF"
+  command: "cat > test.js << 'EOF'\nconst test = 'hello';\nEOF"
 })
-# Error: "syntax error near unexpected token `;'"
-# Reason: \n is interpreted as literal string, not newline
+# Error: "syntax error near unexpected token" EVERY TIME
+# Reason: Docker exec mangles heredoc syntax - THIS NEVER WORKS
+
+# ❌ ALSO WRONG - Trying to create Playwright tests with heredoc
+bash_docker({
+  command: "cat > /tmp/verify.js << 'EOF'\nconst { chromium } = require('playwright');\n..."
+})
+# FAILS 100% OF THE TIME - Docker exec cannot handle heredocs
 ```
 
 ```javascript
-// ✅ CORRECT - Use Write tool instead
+// ✅ CORRECT - ALWAYS use Write tool for file creation
 Write({
-  file_path: "server/index.js",
-  content: `import express from 'express';
-import cors from 'cors';
-
-const app = express();
-// ... rest of code
-`
+  file_path: "test.cjs",  // Use .cjs for CommonJS!
+  content: `const test = 'hello';
+console.log(test);`
 })
 // Works perfectly! Volume mount syncs to container instantly.
+
+// ✅ CORRECT - Creating Playwright test files
+Write({
+  file_path: "verify_task_123.cjs",  // Note: .cjs extension!
+  content: `const { chromium } = require('playwright');
+// ... test code here ...`
+})
+bash_docker({ command: "node verify_task_123.cjs" })  // Then run it
 ```
 
 ### Mistake 2: Trying workarounds (they all fail!)
@@ -295,7 +311,37 @@ bash_docker({ command: "cat > script.sh << 'EOF'\ncat > file.js...\nEOF" })
 Write({ file_path: "server/index.js", content: "..." })
 ```
 
-### Mistake 3: Checking for volume sync
+### Mistake 3: Using wrong file extension with "type": "module"
+
+```bash
+# ❌ WRONG - .js extension with require() fails when package.json has "type": "module"
+Write({ file_path: "verify.js", content: `const { chromium } = require('playwright');` })
+bash_docker({ command: "node verify.js" })
+# Error: "require is not defined in ES module scope"
+
+# ❌ WRONG - Creating files in /tmp/ that disappear between commands
+bash_docker({ command: "echo 'test' > /tmp/test.txt" })  # Even if this worked...
+bash_docker({ command: "cat /tmp/test.txt" })  # File might not persist
+```
+
+```javascript
+// ✅ CORRECT - Use .cjs extension for CommonJS
+Write({
+  file_path: "verify.cjs",  // .cjs extension!
+  content: `const { chromium } = require('playwright');
+// CommonJS code here`
+})
+bash_docker({ command: "node verify.cjs" })  // Works!
+
+// ✅ CORRECT - Use .mjs or .js for ES modules
+Write({
+  file_path: "verify.mjs",  // .mjs extension
+  content: `import { chromium } from 'playwright';
+// ES module code here`
+})
+```
+
+### Mistake 4: Checking for volume sync
 
 ```bash
 # ❌ UNNECESSARY - Volume sync is instant
@@ -595,10 +641,11 @@ For each task:
    // Create screenshots directory for Web UI visibility
    mcp__task-manager__bash_docker({ command: "mkdir -p .playwright-mcp" })
 
-   // Create and run Playwright test script
-   mcp__task-manager__bash_docker({
-     command: `cat > /tmp/verify_task_NNN.js << 'EOF'
-const { chromium } = require('playwright');
+   // ✅ CORRECT: Create test script with Write tool (NOT heredoc!)
+   Write({
+     file_path: "verify_task_NNN.cjs",  // Note: .cjs extension for CommonJS!
+     content: `const { chromium } = require('playwright');
+
 (async () => {
   const browser = await chromium.launch({
     headless: true,
@@ -634,13 +681,14 @@ const { chromium } = require('playwright');
   }, null, 2));
 
   await browser.close();
-})();
-EOF
-node /tmp/verify_task_NNN.js`
+})();`
    });
 
-   // Clean up temporary test script
-   mcp__task-manager__bash_docker({ command: "rm -f /tmp/verify_task_NNN.js" });
+   // Run the test script (file exists in container via volume mount)
+   mcp__task-manager__bash_docker({ command: "node verify_task_NNN.cjs" });
+
+   // Clean up test script
+   mcp__task-manager__bash_docker({ command: "rm -f verify_task_NNN.cjs" });
 
    // Check the output for success/errors
    ```
