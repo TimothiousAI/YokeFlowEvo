@@ -422,6 +422,9 @@ CREATE TABLE prompt_proposals (
     sessions_after_change INTEGER,
     quality_after DECIMAL(3,1),
 
+    -- Additional metadata (diff details, etc.)
+    metadata JSONB DEFAULT '{}',
+
     CONSTRAINT change_type_valid CHECK (change_type IN ('addition', 'modification', 'deletion', 'reorganization')),
     CONSTRAINT status_valid CHECK (status IN ('proposed', 'accepted', 'rejected', 'implemented')),
     CONSTRAINT confidence_valid CHECK (confidence_level BETWEEN 1 AND 10)
