@@ -97,7 +97,8 @@ def analyze_session_logs(jsonl_path: Path) -> Dict[str, Any]:
                         # 2. Docker sandbox Playwright usage via bash_docker
                         elif tool_name == 'mcp__task-manager__bash_docker':
                             # Check if this is a Playwright command
-                            params = event.get('params', {})
+                            # Note: The field is 'input' not 'params' in the JSONL logs
+                            params = event.get('input', {})
                             command = params.get('command', '')
 
                             # Common Playwright commands in Docker
