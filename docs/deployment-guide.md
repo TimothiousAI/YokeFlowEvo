@@ -592,8 +592,13 @@ services:
       POSTGRES_DB: yokeflow
       POSTGRES_USER: agent
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "5432:5432"
+    # SECURITY: Do NOT expose port 5432 to the internet
+    # The API container connects via Docker network (no port mapping needed)
+    # Exposing this port allows internet bots to attempt authentication
+    # If you need direct database access, use SSH tunnel instead:
+    #   ssh -L 5432:localhost:5432 root@your-server
+    # ports:
+    #   - "5432:5432"  # COMMENTED OUT FOR SECURITY
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./schema/postgresql:/docker-entrypoint-initdb.d:ro
@@ -1840,7 +1845,70 @@ docker exec yokeflow-<project-name> npx playwright --version
 
 ---
 
-#### 1. TypeScript Build Error: `SyntaxError: Unexpected token '?'`
+#### 1. Continuous PostgreSQL Authentication Errors - "Role postgres does not exist"
+
+**Symptom:**
+```
+yokeflow_postgres  | FATAL:  password authentication failed for user "postgres"
+yokeflow_postgres  | DETAIL:  Role "postgres" does not exist.
+```
+
+Repeating every few seconds in postgres logs.
+
+**Cause:** PostgreSQL port 5432 is exposed to the internet (`0.0.0.0:5432->5432/tcp`), allowing bots and scanners to attempt connections with default credentials.
+
+**Security Risk:** **HIGH** - Exposing database ports to the internet is a critical security vulnerability.
+
+**Solution:**
+
+```bash
+# 1. IMMEDIATELY block port 5432 with firewall
+sudo ufw deny 5432/tcp
+sudo ufw status
+
+# 2. Edit docker-compose.prod.yml
+vim /var/yokeflow/docker-compose.prod.yml
+
+# Find the postgres service and remove/comment the ports section:
+# FROM:
+#   postgres:
+#     ports:
+#       - "5432:5432"
+# TO:
+#   postgres:
+#     # ports:  # REMOVED FOR SECURITY
+#     #   - "5432:5432"
+
+# 3. Restart postgres container
+docker compose -f docker-compose.prod.yml down postgres
+docker compose -f docker-compose.prod.yml up -d postgres
+
+# 4. Verify port is no longer exposed
+docker ps | grep postgres
+# Should NOT show "0.0.0.0:5432"
+
+# 5. Verify logs are clean (wait 30 seconds)
+docker compose -f docker-compose.prod.yml logs postgres --tail 20
+# Should see no more authentication errors
+```
+
+**Why this works:**
+- API container still connects via Docker network (no port mapping needed)
+- External bots can no longer reach the database
+- Application continues working normally
+
+**If you need database access for debugging:**
+```bash
+# Use SSH tunnel instead of exposing the port
+ssh -L 5432:localhost:5432 root@your-server
+
+# Then connect from local machine
+psql postgresql://agent:password@localhost:5432/yokeflow
+```
+
+---
+
+#### 2. TypeScript Build Error: `SyntaxError: Unexpected token '?'`
 
 **Symptom:**
 ```
