@@ -13,18 +13,22 @@
 > - ✅ Database initialization works (manual step required - see Phase 5)
 > - ✅ Nginx reverse proxy configuration correct
 > - ✅ Docker container management operational
-> - ⚠️ **Application functionality not thoroughly tested** (initialization, coding sessions, etc.)
+> - ✅ Docker image build successful (yokeflow-playwright:latest)
+> - ✅ Project initialization confirmed working (Session 0 starts)
+> - ⚠️ **Full application workflow not thoroughly tested** (complete coding sessions, reviews, etc.)
 >
-> **Known Issues:**
-> - Database schema auto-initialization may fail silently on first run (fix included in Phase 5)
-> - Solution: Manually run schema.sql as documented in Phase 5
+> **Known Issues (Resolved):**
+> - ✅ Database schema auto-initialization may fail silently on first run
+>   - **Solution:** Manually run schema.sql as documented in Phase 5
+> - ✅ Docker image name mismatch (yokeflow-sandbox vs yokeflow-playwright)
+>   - **Solution:** Build as yokeflow-playwright:latest as documented in Phase 7
 >
 > **Testing Needed:**
-> - Project initialization (Session 0)
-> - Coding sessions (Sessions 1+)
-> - Browser verification with Playwright
-> - WebSocket real-time updates
-> - Quality review system
+> - Complete coding sessions (Sessions 1+) with real applications
+> - Browser verification with Playwright in production
+> - WebSocket real-time updates during sessions
+> - Quality review system end-to-end
+> - Multi-project concurrent execution
 >
 > If you encounter issues with application functionality, please report them via GitHub Issues.
 
