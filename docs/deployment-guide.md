@@ -258,8 +258,8 @@ apt install -y git curl wget vim htop postgresql-client
 cd /var
 
 # Clone repository
-git clone https://github.com/yourusername/yokeflow.git
-cd yokeflow
+git clone https://github.com/yourusername/YokeFlow.git
+cd YokeFlow
 ```
 
 ### Phase 3: Configure Environment
@@ -584,8 +584,6 @@ systemctl enable nginx
 Create production Docker Compose configuration:
 
 ```bash
-# Note: Docker Compose V2 no longer requires the 'version' field
-# Omitting it avoids deprecation warnings
 cat > docker-compose.prod.yml <<'EOF'
 services:
   api:
@@ -601,7 +599,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./generations:/app/generations
+      - /var/YokeFlow/generations:/var/YokeFlow/generations
       - /var/run/docker.sock:/var/run/docker.sock  # For Docker sandboxing
     depends_on:
       - postgres
@@ -2522,6 +2520,3 @@ For issues with:
 - **Platform bugs:** GitHub Issues
 - **Deployment questions:** GitHub Discussions
 - **Digital Ocean:** [Digital Ocean Support](https://www.digitalocean.com/support/)
-
----
-
