@@ -500,6 +500,46 @@ class ApiClient {
   getScreenshotUrl(projectId: string, filename: string): string {
     return `${API_BASE}/api/projects/${projectId}/screenshots/${filename}`;
   }
+
+  /**
+   * Get active interventions
+   */
+  async getActiveInterventions(projectId?: string): Promise<any[]> {
+    const url = projectId
+      ? `/api/interventions/active?project_id=${projectId}`
+      : '/api/interventions/active';
+    const response = await this.client.get<any[]>(url);
+    return response.data;
+  }
+
+  /**
+   * Get intervention history
+   */
+  async getInterventionHistory(projectId?: string, limit: number = 50): Promise<any[]> {
+    const url = projectId
+      ? `/api/interventions/history?project_id=${projectId}&limit=${limit}`
+      : `/api/interventions/history?limit=${limit}`;
+    const response = await this.client.get<any[]>(url);
+    return response.data;
+  }
+
+  /**
+   * Resume a paused session
+   */
+  async resumeIntervention(
+    interventionId: string,
+    resolvedBy: string = 'user',
+    resolutionNotes?: string
+  ): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/interventions/${interventionId}/resume`,
+      {
+        resolved_by: resolvedBy,
+        resolution_notes: resolutionNotes,
+      }
+    );
+    return response.data;
+  }
 }
 
 // Export singleton instance

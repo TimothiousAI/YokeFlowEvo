@@ -13,18 +13,22 @@
 > - ✅ Database initialization works (manual step required - see Phase 5)
 > - ✅ Nginx reverse proxy configuration correct
 > - ✅ Docker container management operational
-> - ⚠️ **Application functionality not thoroughly tested** (initialization, coding sessions, etc.)
+> - ✅ Docker image build successful (yokeflow-playwright:latest)
+> - ✅ Project initialization confirmed working (Session 0 starts)
+> - ⚠️ **Full application workflow not thoroughly tested** (complete coding sessions, reviews, etc.)
 >
-> **Known Issues:**
-> - Database schema auto-initialization may fail silently on first run (fix included in Phase 5)
-> - Solution: Manually run schema.sql as documented in Phase 5
+> **Known Issues (Resolved):**
+> - ✅ Database schema auto-initialization may fail silently on first run
+>   - **Solution:** Manually run schema.sql as documented in Phase 5
+> - ✅ Docker image name mismatch (yokeflow-sandbox vs yokeflow-playwright)
+>   - **Solution:** Build as yokeflow-playwright:latest as documented in Phase 7
 >
 > **Testing Needed:**
-> - Project initialization (Session 0)
-> - Coding sessions (Sessions 1+)
-> - Browser verification with Playwright
-> - WebSocket real-time updates
-> - Quality review system
+> - Complete coding sessions (Sessions 1+) with real applications
+> - Browser verification with Playwright in production
+> - WebSocket real-time updates during sessions
+> - Quality review system end-to-end
+> - Multi-project concurrent execution
 >
 > If you encounter issues with application functionality, please report them via GitHub Issues.
 
@@ -254,11 +258,53 @@ apt install -y git curl wget vim htop postgresql-client
 cd /var
 
 # Clone repository
-git clone https://github.com/yourusername/yokeflow.git
-cd yokeflow
+git clone https://github.com/yourusername/YokeFlow.git
+cd YokeFlow
 ```
 
 ### Phase 3: Configure Environment
+
+#### 3.1: Create YokeFlow Configuration
+
+```bash
+# Create YokeFlow configuration file
+cat > .yokeflow.yaml << 'EOF'
+# YokeFlow Configuration - Production Deployment
+
+models:
+  initializer: claude-opus-4-5-20251101
+  coding: claude-sonnet-4-5-20250929
+
+timing:
+  auto_continue_delay: 3
+  web_ui_poll_interval: 5
+
+sandbox:
+  type: docker
+  docker_image: yokeflow-playwright:latest
+  docker_network: bridge
+  docker_memory_limit: 3g
+  docker_cpu_limit: 2.0
+  docker_ports: []
+
+project:
+  default_generations_dir: /var/YokeFlow/generations  # CRITICAL: Must be host path (where you cloned repo)
+  max_iterations: null
+
+review:
+  min_reviews_for_analysis: 5
+EOF
+```
+
+**IMPORTANT - Generations Directory Path:**
+- The `default_generations_dir` must be the **host filesystem path** (not container path)
+- This is the directory where you cloned the YokeFlow repository
+- The GitHub repository is named `YokeFlow` (capital Y, F), so `git clone` creates `/var/YokeFlow/`
+- Use the exact path: `/var/YokeFlow/generations` (match the capitalization from git clone)
+- Both API and agent containers will mount this host path correctly via Docker volumes
+- **Do NOT use `/app/generations`** - that's the container internal path, not the host path
+
+#### 3.2: Configure Environment Variables
 
 ```bash
 # Create production environment file
@@ -538,8 +584,6 @@ systemctl enable nginx
 Create production Docker Compose configuration:
 
 ```bash
-# Note: Docker Compose V2 no longer requires the 'version' field
-# Omitting it avoids deprecation warnings
 cat > docker-compose.prod.yml <<'EOF'
 services:
   api:
@@ -555,7 +599,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./generations:/app/generations
+      - /var/YokeFlow/generations:/var/YokeFlow/generations
       - /var/run/docker.sock:/var/run/docker.sock  # For Docker sandboxing
     depends_on:
       - postgres
@@ -588,8 +632,13 @@ services:
       POSTGRES_DB: yokeflow
       POSTGRES_USER: agent
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "5432:5432"
+    # SECURITY: Do NOT expose port 5432 to the internet
+    # The API container connects via Docker network (no port mapping needed)
+    # Exposing this port allows internet bots to attempt authentication
+    # If you need direct database access, use SSH tunnel instead:
+    #   ssh -L 5432:localhost:5432 root@your-server
+    # ports:
+    #   - "5432:5432"  # COMMENTED OUT FOR SECURITY
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./schema/postgresql:/docker-entrypoint-initdb.d:ro
@@ -732,10 +781,15 @@ Build the agent sandbox image (with Playwright):
 ```bash
 # Build custom agent sandbox image with Playwright pre-installed
 # This image is used by agent sessions for browser testing
-docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
+docker build -f Dockerfile.agent-sandbox -t yokeflow-playwright:latest .
 
 # This build takes 3-5 minutes and ~2GB disk space
 # But it only needs to be done once (or when updating)
+
+# Note: If you have a .yokeflow.yaml file in your project root,
+# it should reference this image name:
+# sandbox:
+#   docker_image: yokeflow-playwright:latest
 ```
 
 Start production services:
@@ -1748,7 +1802,128 @@ docker compose -f docker-compose.prod.yml logs -f api
 
 ---
 
-#### 0b. Playwright Browser Not Found in Agent Container
+#### 0b. Docker Image Not Found - yokeflow-playwright
+
+**Symptom:**
+```
+Failed to start Docker sandbox: 404 Client Error for http+docker://localhost/v1.51/images/create?tag=latest&fromImage=yokeflow-playwright: Not Found ("pull access denied for yokeflow-playwright, repository does not exist or may require 'docker login': denied: requested access to the resource is denied")
+```
+
+**Cause:** The `yokeflow-playwright:latest` Docker image has not been built on the server. This image is required for browser testing with Playwright.
+
+**Solution:**
+
+```bash
+# Build the Playwright-enabled agent sandbox image
+cd /var/yokeflow
+docker build -f Dockerfile.agent-sandbox -t yokeflow-playwright:latest .
+
+# This build takes 3-5 minutes and installs:
+# - Node.js 20 LTS
+# - Playwright and Chromium browser
+# - All browser dependencies (~80 system packages)
+# - Git, build tools, Python
+
+# Verify image was built successfully
+docker images | grep yokeflow-playwright
+
+# Expected output:
+# yokeflow-playwright   latest   abc123def456   2 minutes ago   2.1GB
+
+# Now try initializing your project again - it should work
+```
+
+**Prevention:** Always build the agent sandbox image during Phase 7 of deployment, BEFORE trying to create any projects.
+
+**Note:** This image is only built locally on your server. It is NOT pulled from Docker Hub or any public registry. You must build it yourself using the Dockerfile created in Phase 7.
+
+---
+
+#### 0c. Volume Mount Issue - Files Not Syncing to Container
+
+**Symptom:**
+```
+Agent reports:
+"The workspace is a separate disk mount"
+"The /workspace directory exists in the container but is empty"
+"The volume mount isn't connecting to the host files"
+
+Files exist on host at: /var/yokeflow/generations/project-name/
+Container shows empty: /workspace/
+
+Screenshots are never created in .playwright-mcp/ directory
+```
+
+**Cause:** The `.yokeflow.yaml` file uses a **container path** (`/app/generations`) instead of the **host filesystem path** (`/var/YokeFlow/generations`). This causes agent containers to mount from the wrong location, splitting files across two directories.
+
+**How it happens:**
+1. YokeFlow cloned to `/var/YokeFlow/` (capital Y, F - from GitHub repo name)
+2. Config has `default_generations_dir: /app/generations` (container path - WRONG!)
+3. Orchestrator (in API container) creates project at `/app/generations/claude_ai/`
+4. API's volume mount (`/var/YokeFlow/generations:/app/generations`) makes this accessible to API
+5. But sandbox_manager passes `/app/generations/claude_ai` to Docker for agent container mount
+6. Docker interprets this as a **host path** (not understanding it's a container path)
+7. Since `/app/generations/claude_ai` doesn't exist on host, Docker creates it as a new directory
+8. Result: Files split between `/var/YokeFlow/generations/` (from API) and `/app/generations/` (from agents)
+
+**Solution:**
+
+```bash
+# 1. Stop any running sessions
+cd /var/yokeflow
+docker compose -f docker-compose.prod.yml down
+
+# 2. Edit .yokeflow.yaml
+vim .yokeflow.yaml
+
+# 3. Change the generations directory to use the host path:
+# FROM:
+#   default_generations_dir: /app/generations
+# TO:
+#   default_generations_dir: /var/YokeFlow/generations
+#
+# IMPORTANT: Use the exact path where you cloned YokeFlow (capital Y, F)
+# The GitHub repo name is "YokeFlow" so git clone creates /var/YokeFlow/
+
+# 4. Clean up the wrong directory on host (if it exists)
+sudo rm -rf /app/generations
+
+# 5. Verify the change
+grep default_generations_dir .yokeflow.yaml
+# Should show: default_generations_dir: /var/YokeFlow/generations
+
+# 6. Restart services
+docker compose -f docker-compose.prod.yml up -d
+
+# 7. Delete any partially initialized projects and re-create them
+# Files were split across two locations, need fresh start
+```
+
+**Verification:**
+
+```bash
+# After changing config and restarting, initialize a test project
+# Then check if files sync:
+
+# On host (where you installed YokeFlow)
+ls -la /var/YokeFlow/generations/your-project/
+
+# In API container (should see files via volume mount)
+docker exec yokeflow_api ls -la /app/generations/your-project/
+
+# In agent container (while session is running, should see files via mount)
+docker exec yokeflow-your-project ls -la /workspace/
+
+# All three should show identical files!
+```
+
+**Prevention:** Always use the **host filesystem path** in `.yokeflow.yaml` for production deployments, not container paths. The path should match where you cloned the repository (e.g., `/var/YokeFlow/generations` if you cloned to `/var/YokeFlow/`). Follow Phase 3.1 configuration instructions carefully.
+
+**Why this matters:** When orchestrator creates agent containers, it passes the `project_dir` path to Docker for mounting. Docker interprets this as a host path. If you use a container path like `/app/generations`, Docker will try to mount from `/app/generations` on the **host** (which doesn't exist or is wrong), not from inside the API container.
+
+---
+
+#### 0d. Playwright Browser Not Found in Agent Container
 
 **Symptom:**
 ```
@@ -1763,7 +1938,7 @@ Run "npx playwright install chrome"
 ```bash
 # 1. Build custom agent sandbox image (one-time, 3-5 minutes)
 cd /var/yokeflow
-docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
+docker build -f Dockerfile.agent-sandbox -t yokeflow-playwright:latest .
 
 # This installs:
 # - Playwright browsers (Chrome, Chromium)
@@ -1771,10 +1946,12 @@ docker build -f Dockerfile.agent-sandbox -t yokeflow-sandbox:latest .
 # - Git, build tools
 
 # 2. Verify image built
-docker images | grep yokeflow-sandbox
+docker images | grep yokeflow
+
+# Expected output: yokeflow-playwright   latest   ...
 
 # 3. Next agent session will use new image automatically
-# (config.py defaults to yokeflow-sandbox:latest)
+# (.yokeflow.yaml should specify: docker_image: yokeflow-playwright:latest)
 ```
 
 **Prevention:** Always build agent sandbox image during initial deployment (Phase 7, before starting services)
@@ -1792,7 +1969,70 @@ docker exec yokeflow-<project-name> npx playwright --version
 
 ---
 
-#### 1. TypeScript Build Error: `SyntaxError: Unexpected token '?'`
+#### 1. Continuous PostgreSQL Authentication Errors - "Role postgres does not exist"
+
+**Symptom:**
+```
+yokeflow_postgres  | FATAL:  password authentication failed for user "postgres"
+yokeflow_postgres  | DETAIL:  Role "postgres" does not exist.
+```
+
+Repeating every few seconds in postgres logs.
+
+**Cause:** PostgreSQL port 5432 is exposed to the internet (`0.0.0.0:5432->5432/tcp`), allowing bots and scanners to attempt connections with default credentials.
+
+**Security Risk:** **HIGH** - Exposing database ports to the internet is a critical security vulnerability.
+
+**Solution:**
+
+```bash
+# 1. IMMEDIATELY block port 5432 with firewall
+sudo ufw deny 5432/tcp
+sudo ufw status
+
+# 2. Edit docker-compose.prod.yml
+vim /var/yokeflow/docker-compose.prod.yml
+
+# Find the postgres service and remove/comment the ports section:
+# FROM:
+#   postgres:
+#     ports:
+#       - "5432:5432"
+# TO:
+#   postgres:
+#     # ports:  # REMOVED FOR SECURITY
+#     #   - "5432:5432"
+
+# 3. Restart postgres container
+docker compose -f docker-compose.prod.yml down postgres
+docker compose -f docker-compose.prod.yml up -d postgres
+
+# 4. Verify port is no longer exposed
+docker ps | grep postgres
+# Should NOT show "0.0.0.0:5432"
+
+# 5. Verify logs are clean (wait 30 seconds)
+docker compose -f docker-compose.prod.yml logs postgres --tail 20
+# Should see no more authentication errors
+```
+
+**Why this works:**
+- API container still connects via Docker network (no port mapping needed)
+- External bots can no longer reach the database
+- Application continues working normally
+
+**If you need database access for debugging:**
+```bash
+# Use SSH tunnel instead of exposing the port
+ssh -L 5432:localhost:5432 root@your-server
+
+# Then connect from local machine
+psql postgresql://agent:password@localhost:5432/yokeflow
+```
+
+---
+
+#### 2. TypeScript Build Error: `SyntaxError: Unexpected token '?'`
 
 **Symptom:**
 ```
@@ -2280,8 +2520,3 @@ For issues with:
 - **Platform bugs:** GitHub Issues
 - **Deployment questions:** GitHub Discussions
 - **Digital Ocean:** [Digital Ocean Support](https://www.digitalocean.com/support/)
-
----
-
-**Last Updated:** December 18, 2025
-**Maintainer:** Autonomous Coding Agent Team

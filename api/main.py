@@ -2686,6 +2686,201 @@ async def trigger_bulk_reviews(
 
 
 # =============================================================================
+# Intervention Management Endpoints
+# =============================================================================
+
+class InterventionResponse(BaseModel):
+    """Response model for intervention information."""
+    id: str  # UUID as string
+    session_id: str
+    project_id: str
+    project_name: str
+    pause_reason: str
+    pause_type: str
+    paused_at: str
+    resolved: bool
+    resolved_at: Optional[str] = None
+    resolved_by: Optional[str] = None
+    resolution_notes: Optional[str] = None
+    blocker_info: Dict = {}
+    retry_stats: Dict = {}
+    current_task_id: Optional[str] = None
+    current_task_description: Optional[str] = None
+    can_auto_resume: bool = False
+
+
+class ResumeSessionRequest(BaseModel):
+    """Request model for resuming a paused session."""
+    resolved_by: str = "user"
+    resolution_notes: Optional[str] = None
+
+
+@app.get("/api/interventions/active", response_model=List[InterventionResponse])
+async def get_active_interventions(
+    project_id: Optional[str] = None,
+    db=Depends(get_db)
+) -> List[InterventionResponse]:
+    """Get all active (unresolved) interventions requiring human attention."""
+    try:
+        from core.session_manager import PausedSessionManager
+
+        manager = PausedSessionManager()
+        interventions = await manager.get_active_pauses(project_id)
+
+        return [
+            InterventionResponse(
+                id=str(i["id"]),
+                session_id=str(i["session_id"]),
+                project_id=str(i["project_id"]),
+                project_name=i["project_name"],
+                pause_reason=i["pause_reason"],
+                pause_type=i["pause_type"],
+                paused_at=i["paused_at"].isoformat() if hasattr(i["paused_at"], "isoformat") else str(i["paused_at"]),
+                resolved=i["resolved"],
+                resolved_at=i["resolved_at"].isoformat() if i.get("resolved_at") and hasattr(i["resolved_at"], "isoformat") else None,
+                resolved_by=i.get("resolved_by"),
+                resolution_notes=i.get("resolution_notes"),
+                blocker_info=i.get("blocker_info", {}),
+                retry_stats=i.get("retry_stats", {}),
+                current_task_id=str(i["current_task_id"]) if i.get("current_task_id") else None,
+                current_task_description=i.get("current_task_description"),
+                can_auto_resume=i.get("can_auto_resume", False)
+            )
+            for i in interventions
+        ]
+    except Exception as e:
+        logger.error(f"Error getting active interventions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/interventions/{intervention_id}/resume", response_model=Dict)
+async def resume_paused_session(
+    intervention_id: str,
+    request: ResumeSessionRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db)
+) -> Dict:
+    """Resume a paused session after resolving the issue."""
+    try:
+        from core.session_manager import PausedSessionManager
+
+        manager = PausedSessionManager()
+        resume_context = await manager.resume_session(
+            intervention_id,
+            request.resolved_by,
+            request.resolution_notes
+        )
+
+        # Schedule the session to be resumed in the background
+        async def resume_in_background():
+            try:
+                orchestrator = AgentOrchestrator()
+                # Start a new coding session with the resume context
+                session_info = await orchestrator.start_session(
+                    project_id=resume_context["project_id"],
+                    session_type=SessionType.CODING,
+                    resume_context=resume_context
+                )
+                logger.info(f"Resumed session {session_info.session_id} for project {resume_context['project_id']}")
+            except Exception as e:
+                logger.error(f"Failed to resume session: {e}")
+
+        background_tasks.add_task(resume_in_background)
+
+        return {
+            "status": "resuming",
+            "message": f"Session resuming for project {resume_context['project_name']}",
+            "session_id": resume_context["session_id"],
+            "project_id": resume_context["project_id"]
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error resuming session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/interventions/history", response_model=List[InterventionResponse])
+async def get_intervention_history(
+    project_id: Optional[str] = None,
+    limit: int = 50,
+    db=Depends(get_db)
+) -> List[InterventionResponse]:
+    """Get history of resolved interventions."""
+    try:
+        from core.session_manager import PausedSessionManager
+
+        manager = PausedSessionManager()
+        interventions = await manager.get_intervention_history(project_id, limit)
+
+        return [
+            InterventionResponse(
+                id=str(i["id"]),
+                session_id=str(i["session_id"]),
+                project_id=str(i["project_id"]),
+                project_name=i["project_name"],
+                pause_reason=i["pause_reason"],
+                pause_type=i["pause_type"],
+                paused_at=i["paused_at"].isoformat() if hasattr(i["paused_at"], "isoformat") else str(i["paused_at"]),
+                resolved=i["resolved"],
+                resolved_at=i["resolved_at"].isoformat() if i.get("resolved_at") and hasattr(i["resolved_at"], "isoformat") else None,
+                resolved_by=i.get("resolved_by"),
+                resolution_notes=i.get("resolution_notes"),
+                blocker_info=i.get("blocker_info", {}),
+                retry_stats=i.get("retry_stats", {}),
+                current_task_id=str(i["current_task_id"]) if i.get("current_task_id") else None,
+                current_task_description=i.get("current_task_description"),
+                can_auto_resume=i.get("can_auto_resume", False)
+            )
+            for i in interventions
+        ]
+    except Exception as e:
+        logger.error(f"Error getting intervention history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/notifications/preferences")
+async def get_notification_preferences(
+    project_id: str,
+    db=Depends(get_db)
+) -> Dict:
+    """Get notification preferences for a project."""
+    try:
+        from core.notifications import NotificationPreferencesManager
+
+        project_uuid = UUID(project_id)
+        prefs = await NotificationPreferencesManager.get_preferences(project_id)
+        return prefs
+    except Exception as e:
+        logger.error(f"Error getting notification preferences: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/notifications/preferences")
+async def update_notification_preferences(
+    project_id: str,
+    preferences: Dict = Body(...),
+    db=Depends(get_db)
+) -> Dict:
+    """Update notification preferences for a project."""
+    try:
+        from core.notifications import NotificationPreferencesManager
+
+        project_uuid = UUID(project_id)
+        success = await NotificationPreferencesManager.update_preferences(project_id, preferences)
+
+        if success:
+            return {"status": "success", "message": "Preferences updated"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update preferences")
+
+    except Exception as e:
+        logger.error(f"Error updating notification preferences: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Run the API server
 # =============================================================================
 

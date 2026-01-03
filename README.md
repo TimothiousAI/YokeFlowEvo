@@ -1,6 +1,5 @@
 # YokeFlow - Autonomous AI Development Platform
 
-[![License](https://img.shields.io/badge/License-YCL%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/Node-20%2B-green.svg)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue.svg)](https://www.postgresql.org/)
@@ -643,9 +642,4 @@ Edit files in `prompts/` directory.
 
 ---
 
-## License
-
-YokeFlow Community License (YCL) v1.0 - See [LICENSE](LICENSE) for details.
-
----
 
