@@ -1816,6 +1816,94 @@ async def cancel_stop_after_current(project_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/projects/{project_id}/complete-tests", response_model=SessionResponse)
+async def complete_tests(
+    project_id: str,
+    model: Optional[str] = None,
+    background_tasks: BackgroundTasks = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Run a test completion session to create tests for tasks without any tests.
+
+    This endpoint:
+    - Verifies project is initialized
+    - Runs a single session that creates tests for all tasks missing tests
+    - Uses the test completion prompt to guide the agent
+    - Does NOT auto-continue after completion
+
+    Args:
+        project_id: UUID of the project
+        model: Model to use (optional, defaults to coding model from config)
+
+    Returns:
+        SessionResponse with session details
+
+    Raises:
+        400: Invalid project ID or project not initialized
+        404: Project not found
+        500: Server error during session
+    """
+    try:
+        project_uuid = UUID(project_id)
+
+        # Start test completion session asynchronously
+        async def run_test_completion():
+            try:
+                # Create progress callback for real-time WebSocket updates
+                async def progress_update(event: Dict[str, Any]):
+                    """Broadcast progress events to connected WebSocket clients."""
+                    await notify_project_update(str(project_uuid), {
+                        "type": "progress",
+                        "event": event
+                    })
+
+                session = await orchestrator.complete_test_creation(
+                    project_id=project_uuid,
+                    model=model,
+                    progress_callback=progress_update
+                )
+
+                # Send WebSocket notification
+                await notify_project_update(str(project_uuid), {
+                    "type": "test_completion_complete",
+                    "session": session.to_dict()
+                })
+
+            except Exception as e:
+                logger.error(f"Test completion failed: {e}")
+                await notify_project_update(str(project_uuid), {
+                    "type": "test_completion_error",
+                    "error": str(e)
+                })
+
+        # Run in background
+        task = asyncio.create_task(run_test_completion())
+        running_sessions[f"{project_id}_test_completion"] = task
+
+        return {
+            "session_id": "pending",  # Will be set once session starts
+            "project_id": project_id,
+            "session_number": 0,  # Will be determined dynamically
+            "session_type": "test_completion",
+            "model": model or config.models.coding,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "message": "Test completion session started"
+        }
+
+    except ValueError as e:
+        if "not initialized" in str(e):
+            raise HTTPException(status_code=400, detail=str(e))
+        elif "not found" in str(e):
+            raise HTTPException(status_code=404, detail=str(e))
+        else:
+            raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to start test completion: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # WebSocket for Real-time Updates
 # =============================================================================
@@ -2042,7 +2130,7 @@ async def get_human_log(project_id: str, filename: str):
         if not log_path.exists():
             raise HTTPException(status_code=404, detail="Log file not found")
 
-        content = log_path.read_text()
+        content = log_path.read_text(encoding='utf-8')
         return {"content": content, "filename": filename}
 
     except Exception as e:

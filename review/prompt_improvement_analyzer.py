@@ -643,7 +643,7 @@ class PromptImprovementAnalyzer:
             logger.warning(f"Prompt file not found: {prompt_path}")
             return ""
 
-        return prompt_path.read_text()
+        return prompt_path.read_text(encoding='utf-8')
 
     async def _generate_diffs_for_proposals(
         self,

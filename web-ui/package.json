@@ -4,11 +4,11 @@
   "description": "YokeFlow web interface - autonomous AI development platform",
   "private": true,
   "scripts": {
-    "dev": "NODE_OPTIONS='--max-old-space-size=4096' next dev",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev",
     "dev:stable": "./dev-server.sh",
     "build": "next build",
     "start": "next start",
-    "clean": "rm -rf .next"
+    "clean": "rimraf .next"
   },
   "dependencies": {
     "axios": "^1.13.2",
@@ -27,6 +27,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.22",
+    "cross-env": "^10.1.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

@@ -55,7 +55,7 @@ class DiffGenerator:
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
 
-        original_content = prompt_path.read_text()
+        original_content = prompt_path.read_text(encoding='utf-8')
 
         # Build prompt for Claude to generate improved version
         improvement_prompt = self._build_improvement_prompt(
@@ -238,7 +238,7 @@ Return a JSON object with this structure:
         if not prompt_path.exists():
             raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
 
-        current_content = prompt_path.read_text()
+        current_content = prompt_path.read_text(encoding='utf-8')
 
         # Build prompt for Claude
         diff_prompt = self._build_diff_prompt(

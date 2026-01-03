@@ -519,7 +519,7 @@ Use `python yokeflow.py --project-dir {self.project_path.name}` to start.
 See session_001 logs for initialization details.
 """
 
-            progress_file.write_text(initial_content)
+            progress_file.write_text(initial_content, encoding='utf-8')
             print("  ✅ Backed up and reset claude-progress.md")
 
             return True

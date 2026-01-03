@@ -372,7 +372,7 @@ Ready to begin coding sessions.
 See session_000 logs for initialization details.
 """
 
-            progress_file.write_text(initial_content)
+            progress_file.write_text(initial_content, encoding='utf-8')
 
             return True, None
 

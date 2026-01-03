@@ -344,6 +344,18 @@ class ApiClient {
     return response.data;
   }
 
+  /**
+   * Trigger test completion session to create tests for tasks without any tests.
+   * This runs an agent session that uses MCP tools to create missing tests.
+   */
+  async completeTests(projectId: string, model?: string): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/projects/${projectId}/complete-tests`,
+      model ? { model } : {}
+    );
+    return response.data;
+  }
+
   // ============================================================================
   // Prompt Improvement System
   // ============================================================================

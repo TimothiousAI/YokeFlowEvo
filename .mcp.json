@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "tessl": {
-      "type": "stdio",
-      "command": "tessl",
-      "args": [
-        "mcp",
-        "start"
-      ]
-    },
     "task-manager": {
       "type": "stdio",
       "command": "node",

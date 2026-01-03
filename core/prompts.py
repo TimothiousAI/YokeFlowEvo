@@ -18,7 +18,7 @@ SPECS_DIR = Path(__file__).parent.parent / "specs"
 def load_prompt(name: str) -> str:
     """Load a prompt template from the prompts directory."""
     prompt_path = PROMPTS_DIR / f"{name}.md"
-    return prompt_path.read_text()
+    return prompt_path.read_text(encoding='utf-8')
 
 
 def get_sandbox_preamble(sandbox_type: str = "local") -> str:
@@ -40,7 +40,7 @@ def get_sandbox_preamble(sandbox_type: str = "local") -> str:
         preamble_path = PROMPTS_DIR / "preambles" / "local_sandbox.md"
 
     if preamble_path.exists():
-        return preamble_path.read_text()
+        return preamble_path.read_text(encoding='utf-8')
     else:
         # Fallback for backward compatibility
         return ""
@@ -88,6 +88,19 @@ def get_coding_prompt(sandbox_type: str = "local") -> str:
         prompt_name = "coding_prompt_local"
 
     return load_prompt(prompt_name)
+
+
+def get_complete_tests_prompt() -> str:
+    """
+    Load the test completion prompt.
+
+    This prompt instructs the agent to create tests for tasks
+    that don't have any tests yet.
+
+    Returns:
+        Complete tests prompt content as string
+    """
+    return load_prompt("complete_tests_prompt")
 
 
 def get_prompt_filename(session_type: str, sandbox_type: str = "local") -> str:
@@ -215,7 +228,8 @@ def copy_spec_to_project(project_dir: Path, spec_source_path: Path = None) -> No
                 f"## Available Files\n\n"
                 + "\n".join(file_list)
                 + "\n\n**Remember:** Don't read all files upfront. Read the primary file first, "
-                + "then lazy-load referenced files only when needed for your current task.\n"
+                + "then lazy-load referenced files only when needed for your current task.\n",
+                encoding='utf-8'
             )
 
         print(f"Copied spec folder ({len(copied_files)} files) to project directory (primary: {primary_name})")
@@ -237,7 +251,8 @@ def copy_spec_to_project(project_dir: Path, spec_source_path: Path = None) -> No
                 spec_dest.write_text(
                     f"# Project Specification\n\n"
                     f"The specification for this project is in: `{spec_source.name}`\n\n"
-                    f"**Please read {spec_source.name} for the complete requirements.**\n"
+                    f"**Please read {spec_source.name} for the complete requirements.**\n",
+                    encoding='utf-8'
                 )
             print(f"Copied {spec_source.name} to project directory (app_spec.txt points to it)")
         else:

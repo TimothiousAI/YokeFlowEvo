@@ -88,7 +88,7 @@ async def run_schema(connection_url: str, schema_file: Path) -> None:
     # Try using docker exec psql (most reliable for complex SQL)
     try:
         # Read schema content
-        schema_sql = schema_file.read_text()
+        schema_sql = schema_file.read_text(encoding='utf-8')
 
         # Try docker exec approach
         result = subprocess.run(
@@ -110,7 +110,7 @@ async def run_schema(connection_url: str, schema_file: Path) -> None:
 
     try:
         # Read schema
-        schema_sql = schema_file.read_text()
+        schema_sql = schema_file.read_text(encoding='utf-8')
 
         # Remove comments and execute as single block
         # asyncpg can handle multi-statement execution

@@ -119,7 +119,7 @@ class SessionLogger:
         self._write_jsonl(session_data)
 
         # TXT: Write human-readable header
-        with open(self.txt_file, "w") as f:
+        with open(self.txt_file, "w", encoding='utf-8') as f:
             f.write("=" * 80 + "\n")
             f.write(f"AUTONOMOUS CODING AGENT - SESSION {self.session_number}\n")
             f.write("=" * 80 + "\n")
@@ -133,13 +133,13 @@ class SessionLogger:
 
     def _write_jsonl(self, data: dict):
         """Write a line to the JSONL log file."""
-        with open(self.jsonl_file, "a") as f:
+        with open(self.jsonl_file, "a", encoding='utf-8') as f:
             json.dump(data, f)
             f.write("\n")
 
     def _write_txt(self, text: str):
         """Write text to the human-readable log file."""
-        with open(self.txt_file, "a") as f:
+        with open(self.txt_file, "a", encoding='utf-8') as f:
             f.write(text)
 
     def _emit_event(self, event_type: str, data: dict):

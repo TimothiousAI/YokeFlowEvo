@@ -21,7 +21,7 @@ import {
   PoorCoverageEpic,
   TestCoverageEpic,
 } from '@/lib/types';
-import { AlertTriangle, CheckCircle, BarChart3, ChevronDown, ChevronRight } from 'lucide-react';
+import { AlertTriangle, CheckCircle, BarChart3, ChevronDown, ChevronRight, PlayCircle, Loader2 } from 'lucide-react';
 
 interface TestCoverageReportProps {
   projectId: string;
@@ -32,6 +32,8 @@ export function TestCoverageReport({ projectId }: TestCoverageReportProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedEpic, setExpandedEpic] = useState<number | null>(null);
+  const [isCompletingTests, setIsCompletingTests] = useState(false);
+  const [completionMessage, setCompletionMessage] = useState<string | null>(null);
 
   useEffect(() => {
     loadCoverageData();
@@ -51,6 +53,25 @@ export function TestCoverageReport({ projectId }: TestCoverageReportProps) {
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCompleteTests() {
+    try {
+      setIsCompletingTests(true);
+      setCompletionMessage(null);
+      setError(null);
+      const result = await api.completeTests(projectId);
+      setCompletionMessage(result.message || 'Test completion session started. Check the Sessions tab for progress.');
+      // Reload coverage data after a delay to show updated stats
+      setTimeout(() => {
+        loadCoverageData();
+      }, 5000);
+    } catch (err: any) {
+      console.error('Failed to start test completion:', err);
+      setError(err.response?.data?.detail || err.message || 'Failed to start test completion');
+    } finally {
+      setIsCompletingTests(false);
     }
   }
 
@@ -180,6 +201,44 @@ export function TestCoverageReport({ projectId }: TestCoverageReportProps) {
             ></div>
           </div>
         </div>
+
+        {/* Complete Tests Button */}
+        {overall.tasks_without_tests > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-300">
+                  {overall.tasks_without_tests} tasks are missing tests
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Run a test completion session to automatically create tests for all tasks without coverage
+                </p>
+              </div>
+              <button
+                onClick={handleCompleteTests}
+                disabled={isCompletingTests}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white rounded-lg transition-colors text-sm font-medium"
+              >
+                {isCompletingTests ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Starting...
+                  </>
+                ) : (
+                  <>
+                    <PlayCircle className="w-4 h-4" />
+                    Complete Tests
+                  </>
+                )}
+              </button>
+            </div>
+            {completionMessage && (
+              <div className="mt-3 p-3 bg-green-900/20 border border-green-600/50 rounded-lg">
+                <p className="text-sm text-green-400">{completionMessage}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Poor Coverage Epics */}

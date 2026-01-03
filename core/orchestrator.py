@@ -133,14 +133,14 @@ class AgentOrchestrator:
             if spec_source and not spec_content:
                 spec_source = Path(spec_source)
                 if spec_source.is_file():
-                    spec_content = spec_source.read_text()
+                    spec_content = spec_source.read_text(encoding='utf-8')
                 elif spec_source.is_dir():
                     # For directories, concatenate all relevant files
                     spec_files = []
                     for pattern in ["*.md", "*.txt", "README*"]:
                         spec_files.extend(spec_source.glob(pattern))
                     spec_content = "\n\n".join(
-                        f"# {f.name}\n\n{f.read_text()}"
+                        f"# {f.name}\n\n{f.read_text(encoding='utf-8')}"
                         for f in sorted(spec_files)
                     )
 
@@ -154,7 +154,7 @@ class AgentOrchestrator:
                 copy_spec_to_project(project_path, spec_source)
             elif spec_content:
                 # Write spec_content to app_spec.txt if no source file provided
-                (project_path / "app_spec.txt").write_text(spec_content)
+                (project_path / "app_spec.txt").write_text(spec_content, encoding='utf-8')
 
             # Create project in database
             project = await db.create_project(
@@ -223,7 +223,7 @@ class AgentOrchestrator:
             has_env_variables = False
             if has_env_example and env_example:
                 try:
-                    content = env_example.read_text()
+                    content = env_example.read_text(encoding='utf-8')
                     # Count non-empty, non-comment lines
                     lines = [line.strip() for line in content.splitlines()]
                     var_lines = [line for line in lines if line and not line.startswith('#')]
@@ -521,6 +521,167 @@ class AgentOrchestrator:
                     break
 
         return last_session
+
+    async def complete_test_creation(
+        self,
+        project_id: UUID,
+        model: Optional[str] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> SessionInfo:
+        """
+        Run a session to complete test creation for tasks without tests.
+
+        This method runs a specialized session that:
+        - Identifies tasks without tests
+        - Creates appropriate tests for each task
+        - Uses the MCP task-manager tools
+
+        Args:
+            project_id: UUID of the project
+            model: Model to use (defaults to config.models.initializer for quality)
+            progress_callback: Optional async callback for real-time progress updates
+
+        Returns:
+            SessionInfo for the completed session
+
+        Raises:
+            ValueError: If project doesn't exist or not initialized
+        """
+        async with DatabaseManager() as db:
+            # Verify project exists
+            project = await db.get_project(project_id)
+            if not project:
+                raise ValueError(f"Project not found: {project_id}")
+
+            # Check if initialization is complete
+            epics = await db.list_epics(project_id)
+            if len(epics) == 0:
+                raise ValueError(
+                    "Project not initialized. Run start_initialization() first."
+                )
+
+        # Use initializer model for quality (Opus by default)
+        if not model:
+            model = self.config.models.initializer
+
+        # Run a special test completion session
+        return await self._run_test_completion_session(
+            project_id=project_id,
+            model=model,
+            progress_callback=progress_callback
+        )
+
+    async def _run_test_completion_session(
+        self,
+        project_id: UUID,
+        model: str,
+        progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> SessionInfo:
+        """
+        Internal method to run a test completion session.
+
+        This creates a special session with the test completion prompt.
+        """
+        from core.prompts import get_complete_tests_prompt
+
+        async with DatabaseManager() as db:
+            project = await db.get_project(project_id)
+            project_name = project['name']
+            local_path = project.get('local_path', '')
+
+            # Get project path
+            if not local_path:
+                generations_dir = Path(self.config.project.default_generations_dir)
+                project_path = generations_dir / project_name
+            else:
+                project_path = Path(local_path)
+
+            # Create session in database
+            # Note: Using 'coding' type since 'test_completion' is not in the DB enum
+            # and the project is already initialized
+            session_number = await db.get_next_session_number(project_id)
+            session = await db.create_session(
+                project_id=project_id,
+                session_number=session_number,
+                session_type="coding",  # Use 'coding' - DB enum only has 'initializer' and 'coding'
+                model=model,
+                max_iterations=1,
+            )
+
+            session_id = session['id']
+            created_at = session['created_at']
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+
+            session_info = SessionInfo(
+                session_id=str(session_id),
+                project_id=str(project_id),
+                session_number=session_number,
+                session_type=SessionType.INITIALIZER,  # Use initializer type for logging
+                model=model,
+                status=SessionStatus.PENDING,
+                created_at=created_at,
+            )
+
+            # Create client (for MCP tools access)
+            client = create_client(
+                project_path,
+                model,
+                project_id=str(project_id),
+                docker_container=None  # No Docker needed for test creation
+            )
+
+            # Create logger
+            session_logger = create_session_logger(
+                project_path, session_number, "test_completion", model,
+                sandbox_type="local"
+            )
+
+            # Update session status
+            await db.start_session(session_id)
+            session_info.status = SessionStatus.RUNNING
+            session_info.started_at = datetime.now()
+
+            # Get test completion prompt
+            prompt = get_complete_tests_prompt()
+
+            # Run session
+            try:
+                async with client:
+                    status, response, session_summary = await run_agent_session(
+                        client, prompt, project_path, logger=session_logger, verbose=self.verbose,
+                        progress_callback=progress_callback
+                    )
+
+                # Build metrics
+                metrics = {
+                    "duration_seconds": session_summary.get("duration_seconds", 0),
+                    "status": status,
+                    "message_count": session_summary.get("message_count", 0),
+                    "tool_calls_count": session_summary.get("tool_use_count", 0),
+                    "tokens_input": session_summary.get("tokens_input", 0),
+                    "tokens_output": session_summary.get("tokens_output", 0),
+                }
+
+                if status == "error":
+                    session_info.status = SessionStatus.ERROR
+                    session_info.error_message = response
+                    await db.end_session(session_id, SessionStatus.ERROR.value, error_message=response, metrics=metrics)
+                else:
+                    session_info.status = SessionStatus.COMPLETED
+                    await db.end_session(session_id, SessionStatus.COMPLETED.value, metrics=metrics)
+
+                session_info.ended_at = datetime.now()
+                session_info.metrics = metrics
+
+            except Exception as e:
+                logger.error(f"Test completion session failed: {e}")
+                session_info.status = SessionStatus.ERROR
+                session_info.error_message = str(e)
+                await db.end_session(session_id, SessionStatus.ERROR.value, error_message=str(e))
+                raise
+
+            return session_info
 
     async def start_session(
         self,
