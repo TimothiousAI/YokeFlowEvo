@@ -300,6 +300,45 @@ const tools: Tool[] = [
       required: ['epic_id', 'tasks']
     }
   },
+  {
+    name: 'get_dependency_graph',
+    description: 'Get dependency graph for all tasks with optional format (json/mermaid/ascii)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        format: {
+          type: 'string',
+          enum: ['json', 'mermaid', 'ascii'],
+          description: 'Output format: json (default), mermaid (flowchart), or ascii (text)'
+        },
+        epic_id: {
+          ...idFieldSchema,
+          description: 'Optional: filter to specific epic'
+        }
+      }
+    }
+  },
+  {
+    name: 'get_parallel_batches',
+    description: 'Get computed parallel execution batches based on task dependencies',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epic_id: {
+          ...idFieldSchema,
+          description: 'Optional: filter to specific epic'
+        }
+      }
+    }
+  },
+  {
+    name: 'validate_dependencies',
+    description: 'Validate all task dependencies and check for circular dependencies or missing references',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
   // DEPRECATED: log_session tool removed - sessions are now managed by orchestrator
   // It was creating phantom sessions with status='completed' but no timestamps
   {
@@ -617,6 +656,174 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
           ]
         };
+
+      case 'get_dependency_graph': {
+        // Get all tasks (or filter by epic)
+        const tasksForGraph = await db.listTasks(args?.epic_id as any);
+
+        // Call Python dependency resolver
+        const pythonScript = `
+import sys
+import json
+sys.path.insert(0, '.')
+from core.parallel.dependency_resolver import DependencyResolver
+
+tasks = json.loads(sys.argv[1])
+format_type = sys.argv[2] if len(sys.argv) > 2 else 'json'
+epic_filter = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != 'null' else None
+
+resolver = DependencyResolver()
+graph = resolver.resolve(tasks)
+
+if format_type == 'mermaid':
+    print(resolver.to_mermaid(epic_filter=epic_filter))
+elif format_type == 'ascii':
+    print(resolver.to_ascii(epic_filter=epic_filter))
+else:
+    result = {
+        'batches': graph.batches,
+        'task_order': graph.task_order,
+        'circular_deps': graph.circular_deps,
+        'missing_deps': graph.missing_deps
+    }
+    print(json.dumps(result))
+`;
+
+        try {
+          const { stdout } = await execAsync(
+            `python -c ${JSON.stringify(pythonScript)} ${JSON.stringify(JSON.stringify(tasksForGraph))} ${JSON.stringify(args?.format || 'json')} ${JSON.stringify(args?.epic_id || 'null')}`,
+            { maxBuffer: 10 * 1024 * 1024 }
+          );
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: stdout.trim()
+              }
+            ]
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error computing dependency graph: ${error.message}`
+              }
+            ]
+          };
+        }
+      }
+
+      case 'get_parallel_batches': {
+        const tasksForBatches = await db.listTasks(args?.epic_id as any);
+
+        const pythonScript = `
+import sys
+import json
+sys.path.insert(0, '.')
+from core.parallel.dependency_resolver import DependencyResolver
+
+tasks = json.loads(sys.argv[1])
+resolver = DependencyResolver()
+graph = resolver.resolve(tasks)
+
+result = {
+    'batches': graph.batches,
+    'total_batches': len(graph.batches),
+    'batch_sizes': [len(b) for b in graph.batches]
+}
+print(json.dumps(result, indent=2))
+`;
+
+        try {
+          const { stdout } = await execAsync(
+            `python -c ${JSON.stringify(pythonScript)} ${JSON.stringify(JSON.stringify(tasksForBatches))}`,
+            { maxBuffer: 10 * 1024 * 1024 }
+          );
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: stdout.trim()
+              }
+            ]
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error computing parallel batches: ${error.message}`
+              }
+            ]
+          };
+        }
+      }
+
+      case 'validate_dependencies': {
+        const allTasksForValidation = await db.listTasks();
+
+        const pythonScript = `
+import sys
+import json
+sys.path.insert(0, '.')
+from core.parallel.dependency_resolver import DependencyResolver
+
+tasks = json.loads(sys.argv[1])
+resolver = DependencyResolver()
+graph = resolver.resolve(tasks)
+
+issues = []
+if graph.circular_deps:
+    issues.append({
+        'type': 'circular_dependency',
+        'message': f'Found {len(graph.circular_deps)} circular dependency cycle(s)',
+        'details': [list(cycle) for cycle in graph.circular_deps]
+    })
+
+if graph.missing_deps:
+    issues.append({
+        'type': 'missing_dependency',
+        'message': f'Found {len(graph.missing_deps)} task(s) with invalid dependency references',
+        'details': graph.missing_deps
+    })
+
+result = {
+    'valid': len(issues) == 0,
+    'issues': issues,
+    'total_tasks': len(tasks),
+    'tasks_with_dependencies': len([t for t in tasks if t.get('depends_on')])
+}
+print(json.dumps(result, indent=2))
+`;
+
+        try {
+          const { stdout } = await execAsync(
+            `python -c ${JSON.stringify(pythonScript)} ${JSON.stringify(JSON.stringify(allTasksForValidation))}`,
+            { maxBuffer: 10 * 1024 * 1024 }
+          );
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: stdout.trim()
+              }
+            ]
+          };
+        } catch (error: any) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error validating dependencies: ${error.message}`
+              }
+            ]
+          };
+        }
+      }
 
       case 'bash_docker':
         // Get Docker configuration from environment
