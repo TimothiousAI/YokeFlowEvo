@@ -461,15 +461,17 @@ class AgentOrchestrator:
                 # Return a SessionInfo-like object for the parallel execution
                 # Note: This is a simplified representation since parallel execution
                 # doesn't have a single session ID
+                now = datetime.now()
                 return SessionInfo(
-                    session_id=None,  # No single session ID for parallel execution
-                    project_id=project_id,
+                    session_id='parallel-execution',  # Placeholder ID for parallel execution
+                    project_id=str(project_id),
                     status=SessionStatus.COMPLETED if successful == total else SessionStatus.ERROR,
                     session_number=0,  # Not applicable for parallel
                     session_type=SessionType.CODING,
                     model=coding_model,
-                    started_at=datetime.now(),
-                    completed_at=datetime.now(),
+                    created_at=now,
+                    started_at=now,
+                    ended_at=now,
                     error_message=None if successful == total else f"{total - successful} tasks failed"
                 )
 
