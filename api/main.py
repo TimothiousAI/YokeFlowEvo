@@ -1551,6 +1551,257 @@ async def start_coding_sessions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================================
+# Parallel Execution Endpoints
+# =========================================================================
+
+@app.post("/api/projects/{project_id}/parallel/start")
+async def start_parallel_execution(
+    project_id: str,
+    coding_model: Optional[str] = None,
+    max_concurrency: int = 3,
+    background_tasks: BackgroundTasks = None
+):
+    """
+    Start parallel execution of tasks across multiple agents.
+
+    This endpoint uses the ParallelExecutor to run tasks concurrently
+    in isolated worktrees based on dependency ordering.
+
+    Args:
+        project_id: UUID of the project
+        coding_model: Model to use (optional, defaults to config)
+        max_concurrency: Maximum concurrent agents (1-10, default: 3)
+
+    Returns:
+        Status message indicating parallel execution started
+
+    Raises:
+        400: Invalid project ID or parameters
+        404: Project not found
+        500: Server error during execution start
+    """
+    try:
+        project_uuid = UUID(project_id)
+
+        # Validate max_concurrency
+        if max_concurrency < 1 or max_concurrency > 10:
+            raise HTTPException(
+                status_code=400,
+                detail="max_concurrency must be between 1 and 10"
+            )
+
+        # Start parallel execution asynchronously
+        async def run_parallel():
+            try:
+                # Create progress callback for real-time WebSocket updates
+                async def progress_update(event: Dict[str, Any]):
+                    """Broadcast progress events to connected WebSocket clients."""
+                    await notify_project_update(str(project_uuid), {
+                        "type": "parallel_progress",
+                        "event": event
+                    })
+
+                result = await orchestrator.start_coding_sessions(
+                    project_id=project_uuid,
+                    coding_model=coding_model,
+                    parallel=True,
+                    max_concurrency=max_concurrency,
+                    progress_callback=progress_update
+                )
+
+                # Send WebSocket notification about completion
+                await notify_project_update(str(project_uuid), {
+                    "type": "parallel_complete",
+                    "result": result.to_dict() if result else None
+                })
+
+            except Exception as e:
+                logger.error(f"Parallel execution failed: {e}")
+                await notify_project_update(str(project_uuid), {
+                    "type": "parallel_error",
+                    "error": str(e)
+                })
+
+        # Run in background
+        task = asyncio.create_task(run_parallel())
+        running_sessions[f"{project_id}_parallel"] = task
+
+        return {
+            "status": "started",
+            "project_id": project_id,
+            "max_concurrency": max_concurrency,
+            "model": coding_model or config.models.coding,
+            "message": f"Parallel execution started (max_concurrency={max_concurrency})"
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to start parallel execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/parallel/status")
+async def get_parallel_status(project_id: str):
+    """
+    Get current status of parallel execution.
+
+    Returns information about running agents, current batch, and progress.
+
+    Args:
+        project_id: UUID of the project
+
+    Returns:
+        Dict with execution status details
+
+    Raises:
+        404: Project not found or no parallel execution running
+    """
+    try:
+        # Check if parallel execution is running
+        task_key = f"{project_id}_parallel"
+        if task_key not in running_sessions:
+            raise HTTPException(
+                status_code=404,
+                detail="No parallel execution running for this project"
+            )
+
+        # Note: Status tracking would require storing executor instance
+        # For now, return basic task status
+        task = running_sessions[task_key]
+
+        return {
+            "status": "running" if not task.done() else "completed",
+            "project_id": project_id,
+            "task_done": task.done(),
+            "message": "Parallel execution in progress"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get parallel status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/parallel/cancel")
+async def cancel_parallel_execution(project_id: str):
+    """
+    Cancel running parallel execution.
+
+    Gracefully stops all running agents and cleans up worktrees.
+
+    Args:
+        project_id: UUID of the project
+
+    Returns:
+        Confirmation message
+
+    Raises:
+        404: No parallel execution running
+    """
+    try:
+        task_key = f"{project_id}_parallel"
+        if task_key not in running_sessions:
+            raise HTTPException(
+                status_code=404,
+                detail="No parallel execution running for this project"
+            )
+
+        # Cancel the background task
+        task = running_sessions[task_key]
+        task.cancel()
+        del running_sessions[task_key]
+
+        return {
+            "status": "cancelled",
+            "project_id": project_id,
+            "message": "Parallel execution cancelled"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to cancel parallel execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/parallel/batches")
+async def list_parallel_batches(project_id: str):
+    """
+    List all parallel execution batches for a project.
+
+    Returns information about dependency-ordered batches and their tasks.
+
+    Args:
+        project_id: UUID of the project
+
+    Returns:
+        List of batch information dicts
+
+    Raises:
+        404: Project not found
+    """
+    try:
+        project_uuid = UUID(project_id)
+
+        async with DatabaseManager() as db:
+            batches = await db.list_parallel_batches(project_uuid)
+
+            return {
+                "project_id": project_id,
+                "batches": batches,
+                "total_batches": len(batches)
+            }
+
+    except Exception as e:
+        logger.error(f"Failed to list batches: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/parallel/batches/{batch_num}")
+async def get_batch_details(project_id: str, batch_num: int):
+    """
+    Get detailed information about a specific batch.
+
+    Args:
+        project_id: UUID of the project
+        batch_num: Batch number (1-indexed)
+
+    Returns:
+        Batch details including tasks and status
+
+    Raises:
+        404: Project or batch not found
+    """
+    try:
+        project_uuid = UUID(project_id)
+
+        async with DatabaseManager() as db:
+            batches = await db.list_parallel_batches(project_uuid)
+
+            # Find batch by number
+            batch = next((b for b in batches if b.get('batch_number') == batch_num), None)
+
+            if not batch:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Batch {batch_num} not found"
+                )
+
+            return {
+                "project_id": project_id,
+                "batch": batch
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get batch details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/projects/{project_id}/sessions/start", response_model=SessionResponse)
 async def start_session(project_id: str, session_config: SessionStart, background_tasks: BackgroundTasks):
     """
