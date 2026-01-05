@@ -570,6 +570,27 @@ class ApiClient {
     );
     return response.data;
   }
+
+  /**
+   * Get expertise domains for a project
+   */
+  async getExpertiseDomains(projectId: string): Promise<any[]> {
+    const response = await this.client.get<any[]>(
+      `/api/projects/${projectId}/expertise`
+    );
+    return response.data;
+  }
+
+  /**
+   * Save expertise domain content
+   */
+  async saveExpertiseDomain(projectId: string, domain: string, content: string): Promise<any> {
+    const response = await this.client.put<any>(
+      `/api/projects/${projectId}/expertise/${domain}`,
+      { content }
+    );
+    return response.data;
+  }
 }
 
 // Export singleton instance

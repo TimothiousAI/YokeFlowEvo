@@ -54,7 +54,7 @@ export default function ProjectDetailPage() {
 
   // Panel State: 'session' or 'project' (shows Session Details by default)
   const [activePanel, setActivePanel] = useState<'session' | 'project'>('session');
-  const [detailsModalTab, setDetailsModalTab] = useState<'settings' | 'environment' | 'epics'>('settings');
+  const [detailsModalTab, setDetailsModalTab] = useState<'settings' | 'environment' | 'epics' | 'expertise'>('settings');
 
   // WebSocket for real-time updates
   const {

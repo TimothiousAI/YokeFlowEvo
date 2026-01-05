@@ -20,7 +20,7 @@ import {
   CheckCircle,
   XCircle,
   Edit2,
-  Save,
+  Check,
   X,
   Clock,
   FileText,
@@ -258,7 +258,7 @@ export function ExpertiseViewer({ domains, onSave, className = '' }: ExpertiseVi
                             disabled={saving}
                             className="flex items-center gap-2 px-3 py-1.5 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg transition-colors text-sm disabled:opacity-50"
                           >
-                            <Save className="w-3 h-3" />
+                            <Check className="w-3 h-3" />
                             {saving ? 'Saving...' : 'Save'}
                           </button>
                           <button

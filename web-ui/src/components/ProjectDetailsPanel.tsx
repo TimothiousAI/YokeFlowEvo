@@ -15,6 +15,7 @@ import { ProjectSettingsForm } from './ProjectSettings';
 import { EnvEditor } from './EnvEditor';
 import { EpicAccordion } from './EpicAccordion';
 import { TaskDetailModal } from './TaskDetailModal';
+import { ExpertiseViewer } from './ExpertiseViewer';
 import { api } from '@/lib/api';
 import type { Epic, TaskWithTestCount, Project } from '@/lib/types';
 
@@ -22,8 +23,8 @@ interface ProjectDetailsPanelProps {
   projectId: string;
   project: Project;
   isOpen: boolean;
-  activeTab: 'settings' | 'environment' | 'epics';
-  onTabChange: (tab: 'settings' | 'environment' | 'epics') => void;
+  activeTab: 'settings' | 'environment' | 'epics' | 'expertise';
+  onTabChange: (tab: 'settings' | 'environment' | 'epics' | 'expertise') => void;
   onProjectUpdated?: () => void;
 }
 
@@ -42,10 +43,21 @@ export function ProjectDetailsPanel({
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [showTaskModal, setShowTaskModal] = useState(false);
 
+  // Expertise state
+  const [expertiseDomains, setExpertiseDomains] = useState<any[]>([]);
+  const [expertiseLoading, setExpertiseLoading] = useState(false);
+
   // Load epics when switching to Epics tab
   useEffect(() => {
     if (isOpen && activeTab === 'epics' && epics.length === 0) {
       loadEpics();
+    }
+  }, [isOpen, activeTab]);
+
+  // Load expertise when switching to Expertise tab
+  useEffect(() => {
+    if (isOpen && activeTab === 'expertise' && expertiseDomains.length === 0) {
+      loadExpertise();
     }
   }, [isOpen, activeTab]);
 
@@ -72,6 +84,19 @@ export function ProjectDetailsPanel({
       toast.error('Failed to load epics');
     } finally {
       setEpicsLoading(false);
+    }
+  }
+
+  async function loadExpertise() {
+    try {
+      setExpertiseLoading(true);
+      const domains = await api.getExpertiseDomains(projectId);
+      setExpertiseDomains(domains);
+    } catch (err) {
+      console.error('Failed to load expertise:', err);
+      toast.error('Failed to load expertise domains');
+    } finally {
+      setExpertiseLoading(false);
     }
   }
 
@@ -168,6 +193,17 @@ export function ProjectDetailsPanel({
             Epics
             <span className="ml-2 text-sm text-gray-700 dark:text-gray-500">({project.progress.total_epics})</span>
           </button>
+          <button
+            onClick={() => onTabChange('expertise')}
+            className={`flex-1 px-6 py-4 font-medium transition-colors ${
+              activeTab === 'expertise'
+                ? 'bg-gray-800 text-blue-400 border-b-2 border-blue-500'
+                : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
+            }`}
+          >
+            Expertise
+            <span className="ml-2 text-sm text-gray-700 dark:text-gray-500">({expertiseDomains.length})</span>
+          </button>
         </div>
 
         {/* Content */}
@@ -239,6 +275,35 @@ export function ProjectDetailsPanel({
                     />
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'expertise' && (
+            <div>
+              {expertiseLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-3"></div>
+                    <p className="text-gray-400 text-sm">Loading expertise domains...</p>
+                  </div>
+                </div>
+              ) : (
+                <ExpertiseViewer
+                  domains={expertiseDomains}
+                  onSave={async (domain, content) => {
+                    try {
+                      await api.saveExpertiseDomain(projectId, domain, content);
+                      toast.success('Expertise domain saved');
+                      // Reload expertise domains
+                      loadExpertise();
+                    } catch (err: any) {
+                      console.error('Failed to save expertise:', err);
+                      toast.error('Failed to save expertise domain');
+                    }
+                  }}
+                  onRefresh={loadExpertise}
+                />
               )}
             </div>
           )}
