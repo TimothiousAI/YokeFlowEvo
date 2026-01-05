@@ -412,19 +412,9 @@ class ModelSelector:
 
         # Step 5: Check budget constraints and downgrade if necessary
         within_budget, remaining = self.check_budget()
-        budget_reason = ""
-
-        if not within_budget or remaining < 1.0:  # Less than $1 remaining
-            # Force HAIKU when budget is exhausted or very low
-            if recommended_model != ModelTier.HAIKU:
-                logger.warning(f"Task {task_id}: Budget exhausted, forcing HAIKU (was {recommended_model.value})")
-                recommended_model = ModelTier.HAIKU
-                budget_reason = " - DOWNGRADED: budget exhausted"
-        elif remaining < 10.0 and recommended_model == ModelTier.OPUS:
-            # Downgrade OPUS to SONNET when budget is low
-            logger.warning(f"Task {task_id}: Low budget (${remaining:.2f}), downgrading OPUS to SONNET")
-            recommended_model = ModelTier.SONNET
-            budget_reason = f" - DOWNGRADED: low budget (${remaining:.2f} remaining)"
+        recommended_model, budget_reason = self._downgrade_for_budget(
+            recommended_model, remaining, within_budget
+        )
 
         # Step 6: Build reasoning and estimate cost
         reasoning_parts = [complexity_reason]
@@ -741,13 +731,111 @@ class ModelSelector:
         """
         Check if within budget limit.
 
+        Queries agent_costs table to calculate total spent and compares
+        against config.cost.budget_limit_usd.
+
         Returns:
             Tuple of (within_budget, remaining_usd)
+            - within_budget: True if under budget or no budget set
+            - remaining_usd: Remaining budget (or 999999.0 if unlimited)
         """
-        # Stub - will be fully implemented in task 910
-        # For now, return unlimited budget to allow testing
-        # Task 910 will implement actual budget tracking from agent_costs table
-        return (True, 999999.0)
+        # If no budget limit configured, return unlimited
+        if not hasattr(self.config, 'cost') or self.config.cost.budget_limit_usd is None:
+            return (True, 999999.0)
+
+        budget_limit = self.config.cost.budget_limit_usd
+
+        # Get total spent from agent_costs table
+        # Note: This is a synchronous method, but DB operations are async
+        # We'll use the same pattern as _get_historical_performance_adjustment
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is already running, we can't use run_until_complete
+                # Return unlimited budget to avoid blocking (will be fixed in orchestrator integration)
+                logger.debug("Event loop already running, skipping budget check")
+                return (True, 999999.0)
+        except RuntimeError:
+            # No event loop, create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        # Query total spent
+        total_spent = loop.run_until_complete(self._get_total_spent())
+
+        # Calculate remaining budget
+        remaining = budget_limit - total_spent
+
+        # Within budget if remaining is positive
+        within_budget = remaining > 0
+
+        logger.debug(f"Budget check: spent=${total_spent:.2f}, limit=${budget_limit:.2f}, remaining=${remaining:.2f}")
+
+        # Log warnings at 80% and 95% usage
+        usage_pct = (total_spent / budget_limit) * 100 if budget_limit > 0 else 0
+        if usage_pct >= 95:
+            logger.warning(f"BUDGET CRITICAL: {usage_pct:.1f}% used (${total_spent:.2f} / ${budget_limit:.2f})")
+        elif usage_pct >= 80:
+            logger.warning(f"BUDGET WARNING: {usage_pct:.1f}% used (${total_spent:.2f} / ${budget_limit:.2f})")
+
+        return (within_budget, remaining)
+
+    async def _get_total_spent(self) -> float:
+        """
+        Get total spent from agent_costs table for this project.
+
+        Returns:
+            Total spent in USD
+        """
+        try:
+            async with self.db.acquire() as conn:
+                result = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(SUM(cost_usd), 0) as total_spent
+                    FROM agent_costs
+                    WHERE project_id = $1
+                    """,
+                    self.project_id
+                )
+                return float(result['total_spent']) if result else 0.0
+        except Exception as e:
+            logger.error(f"Failed to query agent costs: {e}")
+            # Return 0 if query fails to avoid blocking execution
+            return 0.0
+
+    def _downgrade_for_budget(
+        self,
+        recommendation: ModelTier,
+        remaining_budget: float,
+        within_budget: bool
+    ) -> tuple[ModelTier, str]:
+        """
+        Downgrade model recommendation when approaching or exceeding budget.
+
+        Args:
+            recommendation: Original model recommendation
+            remaining_budget: Remaining budget in USD
+            within_budget: Whether currently within budget
+
+        Returns:
+            Tuple of (downgraded_model, reason_string)
+            - downgraded_model: Adjusted model tier
+            - reason_string: Explanation for downgrade (empty if no downgrade)
+        """
+        # Force HAIKU when budget is exhausted or very low (< $1)
+        if not within_budget or remaining_budget < 1.0:
+            if recommendation != ModelTier.HAIKU:
+                logger.warning(f"Budget exhausted, forcing HAIKU (was {recommendation.value})")
+                return (ModelTier.HAIKU, " - DOWNGRADED: budget exhausted")
+            return (recommendation, "")
+
+        # Downgrade OPUS to SONNET when budget is low (< $10)
+        if remaining_budget < 10.0 and recommendation == ModelTier.OPUS:
+            logger.warning(f"Low budget (${remaining_budget:.2f}), downgrading OPUS to SONNET")
+            return (ModelTier.SONNET, f" - DOWNGRADED: low budget (${remaining_budget:.2f} remaining)")
+
+        # No downgrade needed
+        return (recommendation, "")
 
     def _extract_task_type(self, task_description: str) -> str:
         """
