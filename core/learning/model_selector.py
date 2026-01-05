@@ -351,19 +351,195 @@ class ModelSelector:
         """
         Recommend optimal model for a task.
 
+        Analyzes task complexity, checks config overrides, considers historical
+        performance, and enforces budget limits.
+
+        Args:
+            task: Task dictionary with description, action, priority, etc.
+
+        Returns:
+            ModelRecommendation with model, reasoning, and estimated cost
+        """
+        task_id = task.get('id', 'unknown')
+
+        # Step 1: Check for configuration overrides first
+        override_model = self._check_config_overrides(task)
+        if override_model:
+            logger.info(f"Task {task_id}: Using config override model {override_model.value}")
+            return ModelRecommendation(
+                model=override_model,
+                reasoning=f"Configuration override for {self._get_override_reason(task)}",
+                estimated_cost=self._estimate_cost(override_model)
+            )
+
+        # Step 2: Analyze task complexity
+        complexity = self.analyze_complexity(task)
+
+        # Step 3: Apply complexity thresholds to select base model
+        if complexity.overall_score < COMPLEXITY_THRESHOLDS['haiku_max']:
+            base_model = ModelTier.HAIKU
+            complexity_reason = f"Low complexity score ({complexity.overall_score:.2f})"
+        elif complexity.overall_score <= COMPLEXITY_THRESHOLDS['sonnet_max']:
+            base_model = ModelTier.SONNET
+            complexity_reason = f"Moderate complexity score ({complexity.overall_score:.2f})"
+        else:
+            base_model = ModelTier.OPUS
+            complexity_reason = f"High complexity score ({complexity.overall_score:.2f})"
+
+        # Step 4: Consider historical performance for similar tasks
+        historical_adjustment = self._get_historical_performance_adjustment(task, base_model)
+        recommended_model = base_model
+        historical_reason = ""
+
+        if historical_adjustment:
+            recommended_model = historical_adjustment['model']
+            historical_reason = f" (adjusted based on {historical_adjustment['reason']})"
+            logger.info(f"Task {task_id}: Historical performance adjusted {base_model.value} -> {recommended_model.value}")
+
+        # Step 5: Check budget constraints and downgrade if necessary
+        within_budget, remaining = self.check_budget()
+        budget_reason = ""
+
+        if not within_budget or remaining < 1.0:  # Less than $1 remaining
+            # Force HAIKU when budget is exhausted or very low
+            if recommended_model != ModelTier.HAIKU:
+                logger.warning(f"Task {task_id}: Budget exhausted, forcing HAIKU (was {recommended_model.value})")
+                recommended_model = ModelTier.HAIKU
+                budget_reason = " - DOWNGRADED: budget exhausted"
+        elif remaining < 10.0 and recommended_model == ModelTier.OPUS:
+            # Downgrade OPUS to SONNET when budget is low
+            logger.warning(f"Task {task_id}: Low budget (${remaining:.2f}), downgrading OPUS to SONNET")
+            recommended_model = ModelTier.SONNET
+            budget_reason = f" - DOWNGRADED: low budget (${remaining:.2f} remaining)"
+
+        # Step 6: Build reasoning and estimate cost
+        reasoning_parts = [complexity_reason]
+        if historical_reason:
+            reasoning_parts.append(historical_reason)
+        if budget_reason:
+            reasoning_parts.append(budget_reason)
+
+        full_reasoning = "; ".join(reasoning_parts)
+        estimated_cost = self._estimate_cost(recommended_model)
+
+        logger.info(f"Task {task_id}: Recommended {recommended_model.value} - {full_reasoning}")
+
+        return ModelRecommendation(
+            model=recommended_model,
+            reasoning=full_reasoning,
+            estimated_cost=estimated_cost,
+            complexity=complexity
+        )
+
+    def _check_config_overrides(self, task: Dict[str, Any]) -> Optional[ModelTier]:
+        """
+        Check for configuration overrides (task type, epic priority, task metadata).
+
         Args:
             task: Task dictionary
 
         Returns:
-            ModelRecommendation with model and reasoning
+            ModelTier if override found, None otherwise
         """
-        # Stub - will be implemented in Epic 95
-        logger.warning("ModelSelector.recommend_model() not yet implemented")
-        return ModelRecommendation(
-            model=ModelTier.SONNET,
-            reasoning="Default model (implementation pending)",
-            estimated_cost=0.0
+        # Check task metadata for explicit model override
+        if 'metadata' in task and task['metadata'].get('force_model'):
+            model_str = task['metadata']['force_model'].lower()
+            if model_str in ['haiku', 'sonnet', 'opus']:
+                return ModelTier[model_str.upper()]
+
+        # Check config for priority-based overrides
+        if hasattr(self.config, 'cost') and hasattr(self.config.cost, 'priority_overrides'):
+            priority = task.get('priority', 5)
+            priority_overrides = self.config.cost.priority_overrides
+            if priority in priority_overrides:
+                model_str = priority_overrides[priority].lower()
+                if model_str in ['haiku', 'sonnet', 'opus']:
+                    return ModelTier[model_str.upper()]
+
+        # Check config for task type overrides (based on keywords in description)
+        if hasattr(self.config, 'cost') and hasattr(self.config.cost, 'model_overrides'):
+            description = task.get('description', '').lower()
+            model_overrides = self.config.cost.model_overrides
+
+            for task_type, model_str in model_overrides.items():
+                if task_type.lower() in description:
+                    if model_str.lower() in ['haiku', 'sonnet', 'opus']:
+                        return ModelTier[model_str.upper()]
+
+        return None
+
+    def _get_override_reason(self, task: Dict[str, Any]) -> str:
+        """Get human-readable reason for override."""
+        if 'metadata' in task and task['metadata'].get('force_model'):
+            return "task metadata"
+
+        if hasattr(self.config, 'cost'):
+            priority = task.get('priority', 5)
+            if hasattr(self.config.cost, 'priority_overrides') and priority in self.config.cost.priority_overrides:
+                return f"priority {priority}"
+
+            description = task.get('description', '').lower()
+            if hasattr(self.config.cost, 'model_overrides'):
+                for task_type in self.config.cost.model_overrides.keys():
+                    if task_type.lower() in description:
+                        return f"task type '{task_type}'"
+
+        return "configuration"
+
+    def _get_historical_performance_adjustment(
+        self,
+        task: Dict[str, Any],
+        base_model: ModelTier
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check historical performance for similar tasks and adjust recommendation.
+
+        Args:
+            task: Task dictionary
+            base_model: Model selected by complexity analysis
+
+        Returns:
+            Dict with 'model' and 'reason' if adjustment needed, None otherwise
+        """
+        # For now, return None - will be implemented in task 909
+        # This method will query agent_costs table to find:
+        # - Success/failure rates per model for similar task types
+        # - Average duration and cost per model
+        # - Recent trends in model performance
+
+        # Example logic (to be implemented):
+        # - If HAIKU has <70% success rate on similar tasks -> upgrade to SONNET
+        # - If SONNET completes similar tasks faster than OPUS -> keep SONNET
+        # - If model consistently times out -> upgrade to more capable model
+
+        return None
+
+    def _estimate_cost(self, model: ModelTier) -> float:
+        """
+        Estimate cost for a task using the given model.
+
+        Uses average token counts from historical data or defaults.
+
+        Args:
+            model: Model tier
+
+        Returns:
+            Estimated cost in USD
+        """
+        # Default token estimates (conservative averages)
+        # These will be refined with actual historical data in task 909
+        DEFAULT_INPUT_TOKENS = 50000   # ~50K tokens average
+        DEFAULT_OUTPUT_TOKENS = 10000  # ~10K tokens average
+
+        pricing = PRICING[model]
+
+        # Calculate cost: (input_tokens / 1M * input_price) + (output_tokens / 1M * output_price)
+        estimated_cost = (
+            (DEFAULT_INPUT_TOKENS / 1_000_000 * pricing['input']) +
+            (DEFAULT_OUTPUT_TOKENS / 1_000_000 * pricing['output'])
         )
+
+        return round(estimated_cost, 4)
 
     def check_budget(self) -> tuple[bool, float]:
         """
@@ -372,9 +548,10 @@ class ModelSelector:
         Returns:
             Tuple of (within_budget, remaining_usd)
         """
-        # Stub - will be implemented in Epic 95
-        logger.warning("ModelSelector.check_budget() not yet implemented")
-        return (True, 0.0)
+        # Stub - will be fully implemented in task 910
+        # For now, return unlimited budget to allow testing
+        # Task 910 will implement actual budget tracking from agent_costs table
+        return (True, 999999.0)
 
     def record_outcome(
         self,

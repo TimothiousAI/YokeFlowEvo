@@ -542,7 +542,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           action: args?.action as string,
           priority: args?.priority as number,
           depends_on: args?.depends_on as any[] | undefined,
-          dependency_type: args?.dependency_type as string | undefined
+          dependency_type: args?.dependency_type as 'hard' | 'soft' | undefined
         };
         const createdTask = await db.createTask(newTask);
         return {

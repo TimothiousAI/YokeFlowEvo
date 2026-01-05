@@ -154,27 +154,15 @@ async def run_coding(
             print(f"\nParallel execution complete: {session.status}")
             return session
         else:
-            # Run sequential coding sessions with auto-continue
-            session_count = 0
-            while True:
-                session = await orchestrator.start_coding_session(
-                    project_id=project_id,
-                    coding_model='sonnet',
-                    auto_continue=True,
-                    progress_callback=progress_callback
-                )
-                session_count += 1
-                print(f"\nSession {session_count} complete: {session.status}")
-
-                if session.status in ['completed', 'error']:
-                    break
-
-                if max_sessions and session_count >= max_sessions:
-                    print(f"Reached max sessions limit ({max_sessions})")
-                    break
-
-                print("Continuing to next session...")
-
+            # Run sequential coding sessions
+            session = await orchestrator.start_coding_sessions(
+                project_id=project_id,
+                coding_model='sonnet',
+                max_iterations=max_sessions or 0,  # 0 = unlimited
+                progress_callback=progress_callback,
+                parallel=False,
+            )
+            print(f"\nSequential execution complete: {session.status}")
             return session
 
     except Exception as e:
