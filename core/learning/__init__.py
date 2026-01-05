@@ -19,10 +19,13 @@ Usage:
     recommendation = selector.recommend_model(task)
 """
 
-from core.learning.expertise_manager import ExpertiseManager
+from core.learning.expertise_manager import ExpertiseManager, ExpertiseFile, DOMAINS, MAX_EXPERTISE_LINES
 from core.learning.model_selector import ModelSelector
 
 __all__ = [
     'ExpertiseManager',
+    'ExpertiseFile',
     'ModelSelector',
+    'DOMAINS',
+    'MAX_EXPERTISE_LINES',
 ]
