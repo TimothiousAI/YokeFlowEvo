@@ -122,6 +122,10 @@ class ParallelExecutor:
         # Track running agents
         self.running_agents: List[RunningAgent] = []
 
+        # Track execution state
+        self.execution_start_time: Optional[float] = None
+        self.current_batch_number: int = 0
+
         logger.info(f"ParallelExecutor initialized (max_concurrency={max_concurrency})")
 
     async def execute(self) -> List[ExecutionResult]:
@@ -133,6 +137,9 @@ class ParallelExecutor:
         """
         logger.info("Starting parallel execution")
         all_results = []
+
+        # Track execution start time
+        self.execution_start_time = time.time()
 
         try:
             # Load incomplete tasks from database
@@ -180,7 +187,18 @@ class ParallelExecutor:
                     logger.info("Execution cancelled")
                     break
 
+                # Update current batch number for status tracking
+                self.current_batch_number = batch_number
+
                 logger.info(f"Processing batch {batch_number}/{len(dependency_graph.batches)}")
+
+                # Log current status
+                status = self.get_status()
+                logger.info(
+                    f"Status: Batch {status['current_batch']}/{len(dependency_graph.batches)}, "
+                    f"{len(task_ids)} tasks, "
+                    f"Duration: {status['total_duration']:.1f}s"
+                )
 
                 # Execute batch and collect results
                 batch_results = await self.execute_batch(batch_number, task_ids)
@@ -188,7 +206,10 @@ class ParallelExecutor:
 
                 # Merge successful worktrees after each batch
                 # This will be implemented when we have worktree merge logic
-                logger.info(f"Batch {batch_number} complete with {len(batch_results)} results")
+                successful = sum(1 for r in batch_results if r.success)
+                logger.info(
+                    f"Batch {batch_number} complete: {successful}/{len(batch_results)} tasks successful"
+                )
 
             logger.info(f"Parallel execution complete: {len(all_results)} tasks processed")
             return all_results
@@ -473,35 +494,175 @@ class ParallelExecutor:
 
     def _build_task_prompt(self, task: dict, expertise: Optional[dict]) -> str:
         """
-        Build context-rich prompt for task execution.
+        Build context-rich prompt for task execution in parallel worktree.
 
         Args:
-            task: Task dictionary
-            expertise: Expertise dictionary for domain
+            task: Task dictionary with description, action, epic_name, priority
+            expertise: Optional expertise dictionary for domain
 
         Returns:
-            Formatted prompt string
+            Formatted prompt string with all context needed for autonomous execution
         """
-        # This is a basic implementation - will be enhanced in Task 891
-        prompt = f"""# Task: {task.get('description', 'Unknown')}
+        task_id = task.get('id', 0)
+        task_desc = task.get('description', 'Unknown')
+        task_action = task.get('action', 'No action specified')
+        epic_name = task.get('epic_name', 'Unknown')
+        priority = task.get('priority', 0)
 
-## Instructions
-{task.get('action', 'No action specified')}
+        # Build comprehensive prompt with all required elements
+        prompt = f"""# Parallel Task Execution: {task_desc}
 
-## Context
-- Epic: {task.get('epic_name', 'Unknown')}
-- Priority: {task.get('priority', 0)}
+**Task ID:** {task_id}
+**Epic:** {epic_name}
+**Priority:** {priority}
+
+## 🎯 Task Objective
+
+{task_desc}
+
+## 📋 Implementation Instructions
+
+{task_action}
+
+## 🔧 Worktree Context (IMPORTANT)
+
+You are executing in an **isolated git worktree** for parallel development:
+
+- **Isolation:** Your changes are isolated from other parallel tasks
+- **Branch:** This worktree has its own branch for epic {task.get('epic_id', 'unknown')}
+- **Merging:** After task completion, changes will be merged back to main
+- **Independence:** Work independently - don't worry about conflicts with other tasks
+- **Git Operations:** All git commands work normally (add, commit, etc.)
+
+**Key Points:**
+- Focus only on this task - other tasks are handled by other agents
+- Commit your changes when done (they'll be merged later)
+- Test your changes thoroughly before completing
+- Don't modify files outside the scope of this task
 """
 
+        # Add domain expertise if available
         if expertise:
-            prompt += f"\n## Domain Expertise\n{expertise}\n"
+            prompt += "\n## 🧠 Domain Expertise\n\n"
 
-        prompt += """
-## Requirements
-- Follow coding guidelines and best practices
-- Write tests for new functionality
-- Update documentation as needed
-- Commit changes with clear messages
+            # Handle expertise as dict with patterns/techniques or as string
+            if isinstance(expertise, dict):
+                if 'patterns' in expertise and expertise['patterns']:
+                    prompt += "**Patterns:**\n"
+                    for pattern in expertise['patterns']:
+                        prompt += f"- {pattern}\n"
+                    prompt += "\n"
+
+                if 'techniques' in expertise and expertise['techniques']:
+                    prompt += "**Techniques:**\n"
+                    for technique in expertise['techniques']:
+                        prompt += f"- {technique}\n"
+                    prompt += "\n"
+
+                # Include any other expertise content
+                if 'content' in expertise:
+                    prompt += f"{expertise['content']}\n\n"
+            else:
+                # Expertise is a string
+                prompt += f"{expertise}\n\n"
+
+        # Extract file paths from action if present (common pattern: "in file.py" or "file: path/to/file.py")
+        import re
+        file_paths = []
+
+        # Pattern 1: "in `path/to/file.py`"
+        file_matches = re.findall(r'`([^`]+\.(?:py|js|ts|jsx|tsx|html|css|json|md))`', task_action)
+        file_paths.extend(file_matches)
+
+        # Pattern 2: "file: path/to/file.py"
+        file_matches2 = re.findall(r'(?:file|path|in|to):\s*([^\s]+\.(?:py|js|ts|jsx|tsx|html|css|json|md))', task_action, re.IGNORECASE)
+        file_paths.extend(file_matches2)
+
+        # Deduplicate
+        file_paths = list(set(file_paths))
+
+        if file_paths:
+            prompt += "## 📁 Files to Modify\n\n"
+            for file_path in file_paths:
+                prompt += f"- `{file_path}`\n"
+            prompt += "\n"
+
+        # Add coding guidelines and verification requirements
+        prompt += """## ✅ Coding Guidelines
+
+**Code Quality:**
+- Follow PEP 8 style guide for Python code
+- Use type hints where appropriate
+- Add docstrings to all functions and classes
+- Keep functions focused and single-purpose
+- Handle errors gracefully with proper exception handling
+
+**Testing:**
+- Write unit tests for new functionality
+- Ensure all tests pass before completing task
+- Use meaningful test names and assertions
+
+**Documentation:**
+- Update relevant documentation files
+- Add inline comments for complex logic
+- Keep README files up to date
+
+**Git Commits:**
+- Commit changes with clear, descriptive messages
+- Use conventional commit format: "feat:", "fix:", "docs:", etc.
+- Commit frequently with logical groupings
+
+## 🔍 Verification Requirements
+
+**Before marking this task complete, you MUST:**
+
+1. **Code Verification:**
+   - Verify code compiles/runs without syntax errors
+   - Check that all imports are correct
+   - Ensure no linting errors
+
+2. **Functionality Verification:**
+   - Test the implemented functionality works as expected
+   - Verify edge cases are handled
+   - Check error handling works correctly
+
+3. **Integration Verification:**
+   - Ensure changes integrate with existing code
+   - Verify no regressions in related functionality
+   - Check that dependencies are satisfied
+
+4. **Commit Changes:**
+   - Stage all relevant changes with `git add`
+   - Commit with a clear message describing what was implemented
+   - Example: `git commit -m "feat: implement agent session execution with timeout"`
+
+## 📌 Task Dependencies
+
+"""
+
+        # Add dependency information if available in task
+        if 'dependencies' in task and task['dependencies']:
+            prompt += "This task depends on:\n"
+            for dep_id in task['dependencies']:
+                prompt += f"- Task #{dep_id}\n"
+            prompt += "\nAll dependencies have been completed before this task started.\n\n"
+        else:
+            prompt += "This task has no dependencies - you can implement it independently.\n\n"
+
+        prompt += """## 🎬 Final Steps
+
+When you complete the task:
+
+1. Verify all requirements above are met
+2. Commit your changes with a clear message
+3. The task will be automatically validated
+4. Your changes will be merged with other completed tasks
+
+Focus on quality over speed. Take time to test thoroughly and write clean, maintainable code.
+
+---
+
+**You are an autonomous agent working on this isolated task. Complete it thoroughly and professionally.**
 """
 
         return prompt
@@ -516,8 +677,6 @@ class ParallelExecutor:
         """
         Execute agent session with Claude SDK.
 
-        This is a stub that will be implemented in Task 890.
-
         Args:
             task: Task dictionary
             prompt: Formatted prompt
@@ -525,40 +684,175 @@ class ParallelExecutor:
             worktree_path: Path to worktree
 
         Returns:
-            ExecutionResult
+            ExecutionResult with success status, duration, cost, and any errors
         """
-        # Stub - will be implemented in Epic 93, Task 890
-        logger.warning(f"Agent execution stub called for task {task.get('id')}")
+        task_id = task.get('id', 0)
+        start_time = time.time()
 
-        # Simulate successful execution for testing
-        await asyncio.sleep(0.1)
+        logger.info(f"Executing agent session for task {task_id} in worktree {worktree_path}")
 
-        return ExecutionResult(
-            task_id=task.get('id', 0),
-            success=True,
-            duration=0.1,
-            cost=0.01,
-            error=None
-        )
+        try:
+            # Import client creation function
+            from core.client import create_client
+            from core.agent import run_agent_session
+            from core.observability import create_session_logger
+            from pathlib import Path
+
+            # Convert worktree path to Path object
+            worktree_dir = Path(worktree_path)
+
+            # Create session logger for this agent session
+            # Use task_id as session number for tracking
+            session_logger = create_session_logger(
+                worktree_dir,
+                session_number=task_id,
+                session_type='coding',
+                model=model
+            )
+
+            # Create Claude SDK client pointing to worktree directory
+            # Pass project_id for MCP task-manager integration
+            client = create_client(
+                project_dir=worktree_dir,
+                model=model,
+                project_id=str(self.project_id)
+            )
+
+            logger.info(f"Created Claude SDK client for task {task_id} (model: {model})")
+
+            # Execute agent session with timeout
+            # Use asyncio.wait_for to enforce timeout (default: 30 minutes)
+            timeout_seconds = 1800  # 30 minutes per task
+
+            try:
+                async with client:
+                    status, response_text, session_summary = await asyncio.wait_for(
+                        run_agent_session(
+                            client=client,
+                            message=prompt,
+                            project_dir=worktree_dir,
+                            logger=session_logger,
+                            verbose=False  # Quiet mode for parallel execution
+                        ),
+                        timeout=timeout_seconds
+                    )
+
+                # Extract metrics from session summary
+                duration = time.time() - start_time
+                cost = 0.0
+
+                if session_summary and 'usage' in session_summary:
+                    usage = session_summary['usage']
+                    cost = usage.get('cost_usd', 0.0)
+
+                    logger.info(
+                        f"Task {task_id} session complete: "
+                        f"{usage.get('input_tokens', 0)} input tokens, "
+                        f"{usage.get('output_tokens', 0)} output tokens, "
+                        f"${cost:.4f}"
+                    )
+
+                # Determine success based on status
+                success = status == 'continue'
+                error_msg = None if success else f"Agent session returned status: {status}"
+
+                if not success:
+                    logger.warning(f"Task {task_id} agent session unsuccessful: {status}")
+
+                return ExecutionResult(
+                    task_id=task_id,
+                    success=success,
+                    duration=duration,
+                    cost=cost,
+                    error=error_msg
+                )
+
+            except asyncio.TimeoutError:
+                duration = time.time() - start_time
+                error_msg = f"Agent session timed out after {timeout_seconds}s"
+                logger.error(f"Task {task_id}: {error_msg}")
+
+                return ExecutionResult(
+                    task_id=task_id,
+                    success=False,
+                    duration=duration,
+                    cost=0.0,
+                    error=error_msg
+                )
+
+        except Exception as e:
+            duration = time.time() - start_time
+            error_msg = f"Agent session execution failed: {str(e)}"
+            logger.error(f"Task {task_id}: {error_msg}", exc_info=True)
+
+            return ExecutionResult(
+                task_id=task_id,
+                success=False,
+                duration=duration,
+                cost=0.0,
+                error=error_msg
+            )
 
     async def cancel(self) -> None:
         """
         Cancel all running agents gracefully.
+
+        Sets the cancellation event, which will be checked by:
+        1. The main execute() loop (stops processing new batches)
+        2. Individual agent sessions via run_agent_session (stops current session)
+
+        Note: Running agents will complete their current operation before stopping.
+        This is a graceful shutdown, not a hard kill.
         """
-        # Stub - will be implemented in Epic 93
-        logger.warning("ParallelExecutor.cancel() not yet implemented")
+        logger.info("Cancellation requested - setting cancel event")
+        self.cancel_event.set()
+
+        # Log current running agents that will be cancelled
+        if self.running_agents:
+            logger.info(f"Cancelling {len(self.running_agents)} running agents:")
+            for agent in self.running_agents:
+                duration = time.time() - agent.started_at
+                logger.info(
+                    f"  - Task {agent.task_id} (Epic {agent.epic_id}) "
+                    f"running for {duration:.1f}s"
+                )
+        else:
+            logger.info("No running agents to cancel")
+
+        # Note: We don't forcefully kill processes here. The cancel_event will be
+        # checked by the execute() loop and by run_agent_session() via session_manager.
+        # This allows agents to clean up gracefully (save logs, finalize sessions, etc.)
 
     def get_status(self) -> dict:
         """
         Get current execution status.
 
         Returns:
-            Dict with running agents, progress, etc.
+            Dict with:
+            - running_agents: List of dicts with task_id, epic_id, duration for each agent
+            - active_agent_count: Number of currently running agents
+            - current_batch: Current batch number being processed (0 if not started)
+            - total_duration: Total execution time in seconds (0.0 if not started)
         """
-        # Stub - will be implemented in Epic 93
+        # Calculate total duration
+        total_duration = 0.0
+        if self.execution_start_time is not None:
+            total_duration = time.time() - self.execution_start_time
+
+        # Build running agents list with current duration
+        running_agents_info = []
+        for agent in self.running_agents:
+            agent_duration = time.time() - agent.started_at
+            running_agents_info.append({
+                'task_id': agent.task_id,
+                'epic_id': agent.epic_id,
+                'duration': agent_duration,
+                'started_at': agent.started_at
+            })
+
         return {
-            'running_agents': [],
-            'active_agent_count': 0,
-            'current_batch': 0,
-            'total_duration': 0.0
+            'running_agents': running_agents_info,
+            'active_agent_count': len(self.running_agents),
+            'current_batch': self.current_batch_number,
+            'total_duration': total_duration
         }
