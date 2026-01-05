@@ -1,12 +1,35 @@
 ## 📊 Current Status
-Progress: 18/80 tasks (22.5%)
-Completed Epics: 2/9 (22.2%)
-Current Epic: #91 - Dependency Resolution
+Progress: 25/80 tasks (31.3%)
+Completed Epics: 3/9 (33.3%)
+Current Epic: #92 - Git Worktree Isolation
 
 ## 🎯 Known Issues & Blockers
-None - Epic 90 foundation complete, ready for Epic 91
+None - Epic 91 dependency resolution complete, ready for Epic 92
 
 ## 📝 Recent Sessions
+
+### Session 3 (2026-01-05) - Epic 91 Dependency Resolution System Complete
+**Completed:** Epic #91 - All 7 tasks (100%)
+**Key Changes:**
+- Implemented DependencyResolver with Kahn's algorithm for topological sorting
+  - Handles hard/soft dependencies, circular detection, priority ordering
+  - Comprehensive test suite (7 tests, all passing)
+- Added dependency visualization (to_mermaid(), to_ascii(), get_critical_path())
+  - Mermaid flowcharts, ASCII diagrams, critical path analysis
+  - Epic and batch filtering support
+- Updated Session 0 prompts with dependency declaration instructions
+  - Common patterns documented (schema→API→UI)
+  - Examples with explicit depends_on usage
+- Created dependency parsing module with inference heuristics
+  - Keyword detection (requires, depends on, after, uses, needs)
+  - Self-reference exclusion, validation
+- Updated MCP tools for dependency support
+  - create_task and expand_epic accept depends_on/dependency_type
+  - Validation of dependency references
+  - Storage in PostgreSQL metadata JSONB field
+- Added MCP dependency graph tools (get_dependency_graph, get_parallel_batches, validate_dependencies)
+- Created FastAPI dependency endpoints (5 routes for graph, batches, critical path, validation)
+**Git Commits:** 86ab59b, 9506e10, 2e367ed, b9937b4, 4b60d99
 
 ### Session 2 (2026-01-05) - Epic 90 Foundation Infrastructure Complete
 **Completed:** Epic #90 - All 13 tasks (100%)
@@ -45,8 +68,9 @@ None - Epic 90 foundation complete, ready for Epic 91
 - Epic completion checks are atomic within transactions
 
 ### Dependencies Between Epics
-- ✅ Epic 90 (Foundation) - **COMPLETE** - Now unblocks Epic 91, 92, 93
-- Epic 91 (Dependencies) + Epic 92 (Worktrees) block Epic 93 (Parallel Executor)
+- ✅ Epic 90 (Foundation) - **COMPLETE**
+- ✅ Epic 91 (Dependencies) - **COMPLETE** - Now unblocks Epic 93
+- Epic 92 (Worktrees) blocks Epic 93 (Parallel Executor)
 - Epic 93 (Parallel) blocks Epic 94 (Self-Learning), Epic 95 (Cost), Epic 96 (UI)
 - All implementation epics block Epic 97 (Testing)
 
@@ -68,21 +92,21 @@ None - Epic 90 foundation complete, ready for Epic 91
 |------|------------|-------------------|--------|
 | Core Refinements | Low | 1 | ✅ Complete |
 | Foundation Infrastructure | Medium | 2-3 | ✅ Complete (2 sessions) |
-| Dependency Resolution | Medium | 2 | 🔄 Next |
-| Git Worktree Isolation | High | 3-4 | Pending |
+| Dependency Resolution | Medium | 2 | ✅ Complete (1 session) |
+| Git Worktree Isolation | High | 3-4 | 🔄 Next |
 | Parallel Execution Engine | High | 3-4 | Pending |
 | Self-Learning System | Medium | 2-3 | Pending |
 | Cost Optimization | Low-Medium | 1-2 | Pending |
 | Observability & UI | Medium | 2-3 | Pending |
 | Testing & Documentation | Medium | 2-3 | Pending |
 
-**Total Estimated: 18-26 sessions (2 complete, 16-24 remaining)**
+**Total Estimated: 18-26 sessions (3 complete, 15-23 remaining)**
 
 ## Recommendations
 
 1. ✅ ~~Start with Epic 89~~ - Complete
 2. ✅ ~~Complete Epic 90 Foundation~~ - Complete
-3. ✅ ~~Prioritize Task 868 (MCP Transactions)~~ - Complete
-4. **Next: Epic 91 - Implement DependencyResolver with Kahn's algorithm**
-5. **Test dependency resolution thoroughly** - Critical for correct parallel execution
+3. ✅ ~~Epic 91 - Dependency Resolution~~ - Complete
+4. **Next: Epic 92 - Implement WorktreeManager for git isolation**
+5. **Then: Epic 93 - ParallelExecutor to orchestrate concurrent agents**
 6. **Keep parallel mode opt-in initially** - Ensure stability before default
