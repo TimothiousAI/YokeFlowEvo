@@ -117,6 +117,165 @@ class WorktreeManager:
             except Exception as e:
                 logger.warning(f"Could not load worktrees from database: {e}")
 
+    async def recover_state(self) -> Dict[str, Any]:
+        """
+        Recover worktree state from both git and database.
+
+        This method reconciles the state between:
+        1. Actual git worktrees on disk
+        2. Database records
+        3. In-memory state
+
+        Useful for recovery after crashes or restarts.
+
+        Returns:
+            Dictionary with recovery results:
+            - recovered_count: Number of worktrees recovered
+            - cleaned_count: Number of stale entries cleaned
+            - errors: List of errors encountered
+        """
+        logger.info("Recovering worktree state from git and database")
+
+        recovered_count = 0
+        cleaned_count = 0
+        errors = []
+
+        try:
+            # Get list of actual git worktrees
+            try:
+                worktrees_output = await self._run_git(['worktree', 'list', '--porcelain'], timeout=30)
+
+                # Parse git worktree list
+                git_worktrees = {}  # path -> branch mapping
+                current_worktree = {}
+
+                for line in worktrees_output.split('\n'):
+                    line = line.strip()
+                    if line.startswith('worktree '):
+                        if current_worktree:
+                            path = current_worktree.get('worktree')
+                            branch = current_worktree.get('branch')
+                            if path and branch:
+                                git_worktrees[path] = branch
+                        current_worktree = {'worktree': line.split(' ', 1)[1]}
+                    elif line.startswith('branch '):
+                        # Format: "branch refs/heads/branch-name"
+                        branch_ref = line.split(' ', 1)[1]
+                        # Extract branch name from ref
+                        branch_name = branch_ref.replace('refs/heads/', '')
+                        current_worktree['branch'] = branch_name
+
+                # Don't forget the last one
+                if current_worktree:
+                    path = current_worktree.get('worktree')
+                    branch = current_worktree.get('branch')
+                    if path and branch:
+                        git_worktrees[path] = branch
+
+                logger.info(f"Found {len(git_worktrees)} git worktrees on disk")
+
+            except GitCommandError as e:
+                logger.warning(f"Could not list git worktrees: {e}")
+                git_worktrees = {}
+
+            # Load database records if available
+            db_worktrees = {}  # epic_id -> worktree_data mapping
+            if self.db:
+                try:
+                    from uuid import UUID
+                    worktrees_data = await self.db.list_worktrees(UUID(self.project_id))
+                    for wt_data in worktrees_data:
+                        db_worktrees[wt_data['epic_id']] = wt_data
+                    logger.info(f"Found {len(db_worktrees)} worktrees in database")
+                except Exception as e:
+                    logger.warning(f"Could not load from database: {e}")
+                    errors.append(f"Database load error: {e}")
+
+            # Reconcile state
+            # 1. Update in-memory state from database
+            for epic_id, wt_data in db_worktrees.items():
+                worktree_path = wt_data['worktree_path']
+
+                # Check if worktree still exists on disk
+                if worktree_path in git_worktrees or Path(worktree_path).exists():
+                    # Worktree exists, restore to in-memory state
+                    worktree_info = WorktreeInfo(
+                        path=wt_data['worktree_path'],
+                        branch=wt_data['branch_name'],
+                        epic_id=wt_data['epic_id'],
+                        status=wt_data['status'],
+                        created_at=wt_data['created_at'],
+                        merged_at=wt_data.get('merged_at')
+                    )
+                    self._worktrees[epic_id] = worktree_info
+                    recovered_count += 1
+                    logger.info(f"Recovered worktree for epic {epic_id}: {worktree_path}")
+                else:
+                    # Worktree doesn't exist on disk but is in database
+                    # Mark as stale in database
+                    logger.warning(f"Stale database entry for epic {epic_id}, worktree not found at {worktree_path}")
+                    if self.db:
+                        try:
+                            from uuid import UUID
+                            await self.db.update_worktree(
+                                worktree_id=epic_id,
+                                status='stale'
+                            )
+                            cleaned_count += 1
+                        except Exception as e:
+                            logger.warning(f"Could not update stale worktree in database: {e}")
+                            errors.append(f"Failed to mark worktree {epic_id} as stale: {e}")
+
+            # 2. Check for git worktrees not in database
+            worktree_dir_path = self.project_path / self.worktree_dir
+            worktree_dir_str = str(worktree_dir_path).replace('\\', '/')
+
+            for worktree_path, branch in git_worktrees.items():
+                # Normalize path for comparison (Windows compatibility)
+                normalized_path = worktree_path.replace('\\', '/')
+
+                # Only care about worktrees in our worktree directory
+                if worktree_dir_str in normalized_path:
+                    # Extract epic_id from path (format: .worktrees/epic-{id})
+                    try:
+                        path_parts = Path(worktree_path).parts
+                        dir_name = path_parts[-1]
+                        if dir_name.startswith('epic-'):
+                            epic_id = int(dir_name.split('-')[1])
+
+                            # Check if we have this in database or memory
+                            if epic_id not in self._worktrees:
+                                logger.warning(f"Found worktree on disk not in database: epic {epic_id} at {worktree_path}")
+                                # Create in-memory entry (will be synced to database on next operation)
+                                worktree_info = WorktreeInfo(
+                                    path=worktree_path,
+                                    branch=branch,
+                                    epic_id=epic_id,
+                                    status='active',
+                                    created_at=datetime.now()
+                                )
+                                self._worktrees[epic_id] = worktree_info
+                                recovered_count += 1
+                    except (ValueError, IndexError) as e:
+                        logger.debug(f"Could not parse epic_id from path {worktree_path}: {e}")
+
+            logger.info(f"State recovery complete: {recovered_count} recovered, {cleaned_count} cleaned")
+
+            return {
+                'recovered_count': recovered_count,
+                'cleaned_count': cleaned_count,
+                'errors': errors
+            }
+
+        except Exception as e:
+            logger.error(f"Error during state recovery: {e}")
+            errors.append(f"Recovery error: {e}")
+            return {
+                'recovered_count': recovered_count,
+                'cleaned_count': cleaned_count,
+                'errors': errors
+            }
+
     def get_worktree_status(self) -> Dict[str, Any]:
         """
         Get current worktree status.
@@ -461,6 +620,229 @@ class WorktreeManager:
         logger.info(f"Worktree merge complete: {merge_commit}")
         return merge_commit
 
+    async def sync_worktree_from_main(
+        self,
+        epic_id: int,
+        strategy: str = 'merge'
+    ) -> Dict[str, Any]:
+        """
+        Sync worktree with latest changes from main branch.
+
+        This pulls the latest changes from main branch into the worktree,
+        allowing the worktree to stay up-to-date with ongoing main branch development.
+
+        Args:
+            epic_id: Epic ID
+            strategy: Sync strategy - 'merge' (default) or 'rebase'
+
+        Returns:
+            Dictionary with sync status:
+            - status: 'success', 'conflict', or 'error'
+            - strategy: Strategy used ('merge' or 'rebase')
+            - message: Description of result
+            - conflicts: List of conflicting files (if status is 'conflict')
+
+        Raises:
+            GitCommandError: If worktree not found or sync fails
+            ValueError: If invalid strategy specified
+        """
+        logger.info(f"Syncing worktree for epic {epic_id} from main (strategy={strategy})")
+
+        # Validate strategy
+        valid_strategies = ['merge', 'rebase']
+        if strategy not in valid_strategies:
+            raise ValueError(
+                f"Invalid strategy '{strategy}'. Must be one of: {', '.join(valid_strategies)}"
+            )
+
+        # Get worktree info
+        if epic_id not in self._worktrees:
+            raise GitCommandError(f"No worktree found for epic {epic_id}")
+
+        worktree_info = self._worktrees[epic_id]
+        worktree_path = Path(worktree_info.path)
+        branch_name = worktree_info.branch
+
+        if not worktree_path.exists():
+            raise GitCommandError(f"Worktree directory does not exist: {worktree_path}")
+
+        # Get main branch name
+        main_branch = await self._get_main_branch()
+        logger.info(f"Syncing from {main_branch} branch")
+
+        try:
+            # Fetch latest changes from main (in main repo, not worktree)
+            logger.info(f"Fetching latest changes from {main_branch}")
+            try:
+                # Fetch to update refs
+                await self._run_git(['fetch', '.', f'{main_branch}:{main_branch}'], timeout=60)
+                logger.info(f"Fetched latest {main_branch}")
+            except GitCommandError as e:
+                # Fetch might fail if we're already up to date or in a worktree
+                logger.debug(f"Fetch had issues (may be okay): {e}")
+
+            # Switch to worktree directory
+            logger.info(f"Syncing changes into worktree branch {branch_name}")
+
+            # Check for uncommitted changes in worktree
+            has_changes = await self._has_uncommitted_changes(cwd=worktree_path)
+            if has_changes:
+                logger.warning(f"Worktree has uncommitted changes, committing before sync")
+                try:
+                    # Commit uncommitted changes
+                    await self._run_git(['add', '-A'], cwd=worktree_path, timeout=30)
+                    commit_msg = f"Auto-commit before sync from {main_branch}"
+                    await self._run_git(
+                        ['commit', '-m', commit_msg],
+                        cwd=worktree_path,
+                        timeout=30
+                    )
+                    logger.info(f"Committed uncommitted changes")
+                except GitCommandError as e:
+                    logger.warning(f"Failed to commit changes: {e}")
+
+            # Perform sync based on strategy
+            if strategy == 'merge':
+                logger.info(f"Merging {main_branch} into {branch_name}")
+                try:
+                    # Merge main into current branch
+                    await self._run_git(
+                        ['merge', main_branch, '--no-edit'],
+                        cwd=worktree_path,
+                        timeout=60
+                    )
+                    logger.info(f"Merge successful")
+
+                    return {
+                        'status': 'success',
+                        'strategy': 'merge',
+                        'message': f'Successfully merged {main_branch} into worktree'
+                    }
+
+                except GitCommandError as e:
+                    # Check if it's a merge conflict
+                    if 'CONFLICT' in str(e) or 'conflict' in str(e).lower():
+                        logger.warning(f"Merge conflict during sync")
+
+                        # Get list of conflicted files
+                        try:
+                            status_output = await self._run_git(
+                                ['status', '--short'],
+                                cwd=worktree_path,
+                                timeout=10
+                            )
+                            conflicted_files = []
+                            for line in status_output.split('\n'):
+                                if line.startswith('UU ') or line.startswith('AA ') or line.startswith('DD '):
+                                    file_path = line[3:].strip()
+                                    conflicted_files.append(file_path)
+
+                            logger.info(f"Found {len(conflicted_files)} conflicted files")
+
+                            return {
+                                'status': 'conflict',
+                                'strategy': 'merge',
+                                'message': f'Merge conflicts detected in {len(conflicted_files)} file(s)',
+                                'conflicts': conflicted_files
+                            }
+
+                        except GitCommandError:
+                            return {
+                                'status': 'conflict',
+                                'strategy': 'merge',
+                                'message': 'Merge conflicts detected',
+                                'conflicts': []
+                            }
+                    else:
+                        # Other merge error
+                        logger.error(f"Merge failed: {e}")
+                        raise
+
+            else:  # rebase strategy
+                logger.info(f"Rebasing {branch_name} onto {main_branch}")
+                try:
+                    # Rebase current branch onto main
+                    await self._run_git(
+                        ['rebase', main_branch],
+                        cwd=worktree_path,
+                        timeout=120
+                    )
+                    logger.info(f"Rebase successful")
+
+                    return {
+                        'status': 'success',
+                        'strategy': 'rebase',
+                        'message': f'Successfully rebased onto {main_branch}'
+                    }
+
+                except GitCommandError as e:
+                    # Check if it's a rebase conflict
+                    if 'CONFLICT' in str(e) or 'conflict' in str(e).lower():
+                        logger.warning(f"Rebase conflict during sync")
+
+                        # Get list of conflicted files
+                        try:
+                            status_output = await self._run_git(
+                                ['status', '--short'],
+                                cwd=worktree_path,
+                                timeout=10
+                            )
+                            conflicted_files = []
+                            for line in status_output.split('\n'):
+                                if line.startswith('UU ') or line.startswith('AA ') or line.startswith('DD '):
+                                    file_path = line[3:].strip()
+                                    conflicted_files.append(file_path)
+
+                            logger.info(f"Found {len(conflicted_files)} conflicted files")
+
+                            # Abort the rebase to leave in clean state
+                            try:
+                                await self._run_git(
+                                    ['rebase', '--abort'],
+                                    cwd=worktree_path,
+                                    timeout=30
+                                )
+                                logger.info(f"Rebase aborted")
+                            except GitCommandError:
+                                pass
+
+                            return {
+                                'status': 'conflict',
+                                'strategy': 'rebase',
+                                'message': f'Rebase conflicts detected in {len(conflicted_files)} file(s)',
+                                'conflicts': conflicted_files
+                            }
+
+                        except GitCommandError:
+                            # Abort the rebase
+                            try:
+                                await self._run_git(
+                                    ['rebase', '--abort'],
+                                    cwd=worktree_path,
+                                    timeout=30
+                                )
+                            except GitCommandError:
+                                pass
+
+                            return {
+                                'status': 'conflict',
+                                'strategy': 'rebase',
+                                'message': 'Rebase conflicts detected',
+                                'conflicts': []
+                            }
+                    else:
+                        # Other rebase error
+                        logger.error(f"Rebase failed: {e}")
+                        raise
+
+        except Exception as e:
+            logger.error(f"Failed to sync worktree: {e}")
+            return {
+                'status': 'error',
+                'strategy': strategy,
+                'message': f'Sync failed: {str(e)}'
+            }
+
     async def cleanup_worktree(self, epic_id: int) -> None:
         """
         Remove worktree and clean up resources.
@@ -707,6 +1089,316 @@ class WorktreeManager:
         has_changes = len(output) > 0
         logger.debug(f"Uncommitted changes: {has_changes}")
         return has_changes
+
+    async def _check_merge_conflicts(self, branch: str) -> bool:
+        """
+        Check if merging a branch would cause conflicts using git merge-tree dry run.
+
+        Args:
+            branch: Branch name to check for conflicts
+
+        Returns:
+            True if conflicts would occur, False otherwise
+
+        Raises:
+            GitCommandError: If conflict check fails
+        """
+        logger.info(f"Checking for merge conflicts with branch {branch}")
+
+        try:
+            # Get main branch
+            main_branch = await self._get_main_branch()
+
+            # Get merge base
+            merge_base_output = await self._run_git(
+                ['merge-base', main_branch, branch],
+                timeout=10
+            )
+            merge_base = merge_base_output.strip()
+            logger.debug(f"Merge base: {merge_base}")
+
+            # Use merge-tree for dry-run conflict detection
+            # Format: git merge-tree <base-commit> <branch1> <branch2>
+            try:
+                output = await self._run_git(
+                    ['merge-tree', merge_base, main_branch, branch],
+                    timeout=30
+                )
+
+                # Check if output contains conflict markers
+                has_conflicts = '<<<<<<< ' in output or 'CONFLICT' in output
+
+                if has_conflicts:
+                    logger.warning(f"Merge conflicts detected for branch {branch}")
+                    logger.debug(f"Conflict preview:\n{output[:500]}")  # Log first 500 chars
+                else:
+                    logger.info(f"No merge conflicts detected for branch {branch}")
+
+                return has_conflicts
+
+            except GitCommandError as e:
+                # merge-tree might not be available in older git versions
+                logger.warning(f"merge-tree command failed: {e}")
+                logger.info(f"Cannot perform dry-run conflict check, assuming no conflicts")
+                return False
+
+        except GitCommandError as e:
+            logger.error(f"Failed to check for merge conflicts: {e}")
+            raise
+
+    async def get_conflict_details(self, epic_id: int) -> List[Dict[str, Any]]:
+        """
+        Get detailed information about merge conflicts for a worktree.
+
+        Args:
+            epic_id: Epic ID
+
+        Returns:
+            List of dictionaries with conflict information:
+            - file: File path with conflict
+            - status: Conflict type (both_modified, deleted_by_us, etc.)
+            - details: Additional conflict details
+
+        Raises:
+            GitCommandError: If worktree not found or conflict check fails
+        """
+        logger.info(f"Getting conflict details for epic {epic_id}")
+
+        # Get worktree info
+        if epic_id not in self._worktrees:
+            raise GitCommandError(f"No worktree found for epic {epic_id}")
+
+        worktree_info = self._worktrees[epic_id]
+        branch_name = worktree_info.branch
+
+        # Check if there are conflicts
+        has_conflicts = await self._check_merge_conflicts(branch_name)
+
+        if not has_conflicts:
+            logger.info(f"No conflicts detected for epic {epic_id}")
+            return []
+
+        # Get main branch
+        main_branch = await self._get_main_branch()
+
+        # Get merge base
+        merge_base_output = await self._run_git(
+            ['merge-base', main_branch, branch_name],
+            timeout=10
+        )
+        merge_base = merge_base_output.strip()
+
+        # Use merge-tree to get detailed conflict information
+        try:
+            output = await self._run_git(
+                ['merge-tree', merge_base, main_branch, branch_name],
+                timeout=30
+            )
+
+            # Parse conflict information
+            conflicts = []
+
+            # Look for conflict markers and file information
+            # merge-tree output format includes conflict markers and file paths
+            import re
+
+            # Find all files with conflict markers
+            conflict_sections = output.split('<<<<<<< ')
+            for section in conflict_sections[1:]:  # Skip first empty section
+                lines = section.split('\n')
+                # First line after <<<<<<< contains branch info
+                # Look for file path in the section
+                file_match = re.search(r'^\+\+\+ b/(.+)$', section, re.MULTILINE)
+                if file_match:
+                    file_path = file_match.group(1)
+                else:
+                    # Fallback: try to extract from context
+                    file_path = "unknown"
+
+                conflicts.append({
+                    'file': file_path,
+                    'status': 'both_modified',
+                    'details': f'Conflicting changes in {file_path}'
+                })
+
+            # If we couldn't parse specific files, provide general conflict info
+            if not conflicts:
+                conflicts.append({
+                    'file': 'multiple files',
+                    'status': 'conflict_detected',
+                    'details': 'Merge conflicts detected, run merge to see specific files'
+                })
+
+            logger.info(f"Found {len(conflicts)} conflicting files for epic {epic_id}")
+            for conflict in conflicts:
+                logger.debug(f"  Conflict: {conflict['file']} - {conflict['status']}")
+
+            return conflicts
+
+        except GitCommandError as e:
+            logger.error(f"Failed to get conflict details: {e}")
+            raise
+
+    async def resolve_conflict(
+        self,
+        epic_id: int,
+        strategy: str = 'manual'
+    ) -> Dict[str, Any]:
+        """
+        Resolve merge conflicts using specified strategy.
+
+        Args:
+            epic_id: Epic ID
+            strategy: Resolution strategy:
+                - 'ours': Keep changes from main branch
+                - 'theirs': Keep changes from worktree branch
+                - 'manual': Leave conflict markers for human resolution
+
+        Returns:
+            Dictionary with resolution status:
+            - status: 'resolved' or 'manual_required'
+            - strategy: Strategy used
+            - message: Description of action taken
+
+        Raises:
+            GitCommandError: If worktree not found or resolution fails
+            ValueError: If invalid strategy specified
+        """
+        logger.info(f"Resolving conflicts for epic {epic_id} with strategy '{strategy}'")
+
+        # Validate strategy
+        valid_strategies = ['ours', 'theirs', 'manual']
+        if strategy not in valid_strategies:
+            raise ValueError(
+                f"Invalid strategy '{strategy}'. Must be one of: {', '.join(valid_strategies)}"
+            )
+
+        # Get worktree info
+        if epic_id not in self._worktrees:
+            raise GitCommandError(f"No worktree found for epic {epic_id}")
+
+        worktree_info = self._worktrees[epic_id]
+        branch_name = worktree_info.branch
+
+        # Get main branch
+        main_branch = await self._get_main_branch()
+
+        if strategy == 'manual':
+            # For manual strategy, we don't auto-resolve
+            # Just return conflict details for human resolution
+            logger.info(f"Manual resolution requested - conflicts left for human intervention")
+
+            conflicts = await self.get_conflict_details(epic_id)
+
+            return {
+                'status': 'manual_required',
+                'strategy': 'manual',
+                'message': f'Conflicts detected in {len(conflicts)} file(s). Manual resolution required.',
+                'conflicts': conflicts
+            }
+
+        # For 'ours' or 'theirs' strategies, we need to attempt a merge
+        # and then resolve conflicts automatically
+        try:
+            # Attempt the merge to create conflict state
+            logger.info(f"Attempting merge to create conflict state")
+
+            # Switch to main branch
+            current_branch = await self._get_current_branch()
+            if current_branch != main_branch:
+                await self._run_git(['checkout', main_branch], timeout=30)
+
+            try:
+                # Try to merge - this will fail with conflicts
+                await self._run_git(
+                    ['merge', '--no-commit', '--no-ff', branch_name],
+                    timeout=60
+                )
+
+                # If merge succeeded without conflicts, we're done
+                logger.info(f"Merge succeeded without conflicts")
+
+                # Complete the merge
+                commit_msg = f"Merge epic {epic_id}: {branch_name}"
+                await self._run_git(['commit', '-m', commit_msg], timeout=30)
+
+                return {
+                    'status': 'resolved',
+                    'strategy': strategy,
+                    'message': 'No conflicts - merge completed successfully'
+                }
+
+            except GitCommandError as e:
+                # Check if it's a conflict error
+                if 'CONFLICT' not in str(e) and 'conflict' not in str(e).lower():
+                    # Not a conflict, some other error
+                    raise
+
+                logger.info(f"Conflicts detected during merge, applying {strategy} strategy")
+
+                # Get list of conflicted files
+                status_output = await self._run_git(['status', '--short'], timeout=10)
+                conflicted_files = []
+                for line in status_output.split('\n'):
+                    if line.startswith('UU ') or line.startswith('AA ') or line.startswith('DD '):
+                        # Extract file path (after status markers)
+                        file_path = line[3:].strip()
+                        conflicted_files.append(file_path)
+
+                logger.info(f"Found {len(conflicted_files)} conflicted files")
+
+                if not conflicted_files:
+                    # No conflicted files found, abort merge
+                    await self._run_git(['merge', '--abort'], timeout=30)
+                    return {
+                        'status': 'resolved',
+                        'strategy': strategy,
+                        'message': 'No conflicted files detected'
+                    }
+
+                # Resolve each conflicted file using the specified strategy
+                for file_path in conflicted_files:
+                    logger.info(f"Resolving {file_path} with strategy '{strategy}'")
+
+                    if strategy == 'ours':
+                        # Keep version from main branch (current HEAD)
+                        await self._run_git(
+                            ['checkout', '--ours', file_path],
+                            timeout=30
+                        )
+                    elif strategy == 'theirs':
+                        # Keep version from worktree branch
+                        await self._run_git(
+                            ['checkout', '--theirs', file_path],
+                            timeout=30
+                        )
+
+                    # Stage the resolved file
+                    await self._run_git(['add', file_path], timeout=30)
+
+                # Complete the merge
+                commit_msg = f"Merge epic {epic_id}: {branch_name} (resolved with {strategy})"
+                await self._run_git(['commit', '-m', commit_msg], timeout=30)
+
+                logger.info(f"Conflicts resolved using {strategy} strategy")
+
+                return {
+                    'status': 'resolved',
+                    'strategy': strategy,
+                    'message': f'Resolved {len(conflicted_files)} conflicted file(s) using {strategy} strategy',
+                    'files_resolved': conflicted_files
+                }
+
+        except Exception as e:
+            # If something went wrong, try to abort the merge
+            try:
+                await self._run_git(['merge', '--abort'], timeout=30)
+                logger.info(f"Merge aborted after error")
+            except GitCommandError:
+                pass
+
+            logger.error(f"Failed to resolve conflicts: {e}")
+            raise GitCommandError(f"Conflict resolution failed: {e}")
 
     def _sanitize_branch_name(self, name: str) -> str:
         """
