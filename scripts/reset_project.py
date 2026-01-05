@@ -576,27 +576,27 @@ See session_001 logs for initialization details.
             print("\n[DRY RUN MODE - No changes will be made]")
 
         # Perform reset operations
-        print(f"\n{'─'*70}")
+        print(f"\n{'-'*70}")
         print("Step 1: Reset Database (PostgreSQL)")
-        print(f"{'─'*70}")
+        print(f"{'-'*70}")
         if not await self.reset_database():
             return False
 
-        print(f"\n{'─'*70}")
+        print(f"\n{'-'*70}")
         print("Step 2: Archive Coding Session Logs")
-        print(f"{'─'*70}")
+        print(f"{'-'*70}")
         if not self.archive_logs():
             return False
 
-        print(f"\n{'─'*70}")
+        print(f"\n{'-'*70}")
         print("Step 3: Reset Progress Notes")
-        print(f"{'─'*70}")
+        print(f"{'-'*70}")
         if not self.reset_progress_notes():
             return False
 
-        print(f"\n{'─'*70}")
+        print(f"\n{'-'*70}")
         print("Step 4: Reset Git Repository")
-        print(f"{'─'*70}")
+        print(f"{'-'*70}")
         if not self.reset_git(init_commit):
             return False
 

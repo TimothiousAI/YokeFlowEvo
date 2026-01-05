@@ -11,13 +11,13 @@ Supports multiple sandbox backends:
 
 Architecture:
     AgentOrchestrator
-      ↓
+      v
     SandboxManager.create()
-      ↓
+      v
     Sandbox (base class)
-      ├── LocalSandbox (no isolation)
-      ├── DockerSandbox (Docker containers)
-      └── E2BSandbox (E2B cloud - future)
+      |---- LocalSandbox (no isolation)
+      |---- DockerSandbox (Docker containers)
+      +---- E2BSandbox (E2B cloud - future)
 """
 
 import os

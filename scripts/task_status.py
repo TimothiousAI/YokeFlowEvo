@@ -119,7 +119,7 @@ async def show_pending_tasks(db, project_id: UUID, limit: int = 10) -> None:
     tasks = await db.list_tasks(project_id, only_pending=True, limit=limit)
 
     if not tasks:
-        console.print("[green]✨ No pending tasks![/green]")
+        console.print("[green]* No pending tasks![/green]")
         return
 
     table = Table(title=f"Next {limit} Pending Tasks", box=box.ROUNDED)
@@ -175,7 +175,7 @@ async def show_next_task(db, project_id: UUID) -> None:
     task = await db.get_next_task(project_id)
 
     if not task:
-        console.print("[green]✨ All tasks completed![/green]")
+        console.print("[green]* All tasks completed![/green]")
         return
 
     # Tests are already included in the task from get_next_task()

@@ -715,7 +715,7 @@ You are executing in an **isolated git worktree** for parallel development:
    - Commit with a clear message describing what was implemented
    - Example: `git commit -m "feat: implement agent session execution with timeout"`
 
-## 📌 Task Dependencies
+## Task Dependencies
 
 """
 
@@ -728,7 +728,7 @@ You are executing in an **isolated git worktree** for parallel development:
         else:
             prompt += "This task has no dependencies - you can implement it independently.\n\n"
 
-        prompt += """## 🎬 Final Steps
+        prompt += """## Final Steps
 
 When you complete the task:
 

@@ -84,7 +84,7 @@ async def cleanup_stale_sessions(project_name: str = None, force: bool = False):
     for session in running:
         minutes = session['minutes_running']
         started = session['started_at']
-        print(f"  • Session {session['session_number']} ({session['type']}) in '{session['project_name']}'")
+        print(f"  - Session {session['session_number']} ({session['type']}) in '{session['project_name']}'")
         print(f"    Started: {started} ({minutes:.1f} minutes ago)")
 
         # Determine if stale based on type

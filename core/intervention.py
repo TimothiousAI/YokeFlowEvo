@@ -283,9 +283,9 @@ class NotificationService:
 **Error:** {blocker_info.get('message', 'No error message')[:200]}
 
 **Retry Statistics:**
-• Total retries: {retry_stats.get('total_retries', 0)}
-• Max retries on single command: {retry_stats.get('max_retries_on_single_command', 0)}
-• Unique errors: {retry_stats.get('unique_errors', 0)}
+- Total retries: {retry_stats.get('total_retries', 0)}
+- Max retries on single command: {retry_stats.get('max_retries_on_single_command', 0)}
+- Unique errors: {retry_stats.get('unique_errors', 0)}
 
 **Action Required:** Manual intervention needed to resolve infrastructure issue.
 

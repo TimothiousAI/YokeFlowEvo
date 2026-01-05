@@ -162,7 +162,7 @@ async def cleanup_containers(stopped_only: bool = False, force: bool = False, al
     # Confirmation
     print(f"Will remove {len(to_remove)} container(s):\n")
     for name, reason in to_remove:
-        print(f"  • {name}")
+        print(f"  - {name}")
         print(f"    Reason: {reason}")
     print()
 

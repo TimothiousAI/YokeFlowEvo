@@ -93,7 +93,7 @@ class SessionLogger:
         self.browser_verifications = 0
 
         # Track token usage (estimated from character counts)
-        # Rough estimate: 1 token ≈ 4 characters for English text
+        # Rough estimate: 1 token ~ 4 characters for English text
         # This is an approximation since we don't have direct API access
         self.input_chars = 0   # Prompt + tool results
         self.output_chars = 0  # Assistant responses
