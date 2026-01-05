@@ -781,7 +781,86 @@ project scope before any coding begins.
 
 ---
 
-## TASK 3: Create Environment Template
+## TASK 3: Create .gitignore File
+
+**CRITICAL: Create .gitignore FIRST, before any dependency installation or file generation!**
+
+Create a comprehensive `.gitignore` file to prevent committing unnecessary files to git.
+
+**Why this must be first:**
+- Prevents accidentally committing `node_modules/`, `venv/`, `.env` files
+- Must exist BEFORE running `npm install`, `pip install`, or any dependency commands
+- Ensures clean git history from the start
+
+**Standard .gitignore template:**
+
+```gitignore
+# Dependencies
+node_modules/
+venv/
+.venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+.next/
+out/
+
+# Testing
+coverage/
+.nyc_output/
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+```
+
+**Commit .gitignore immediately:**
+```bash
+git add .gitignore
+git commit -m "Add comprehensive .gitignore"
+```
+
+This ensures all subsequent operations (dependency installation, file generation) benefit from proper git ignore rules.
+
+---
+
+## TASK 4: Create Environment Template
 
 Create a `.env.example` file that documents all required environment variables.
 
@@ -818,7 +897,7 @@ Create an empty `.env.example` with a comment:
 
 ---
 
-## TASK 4: Create init.sh
+## TASK 5: Create init.sh
 
 Create a script called `init.sh` that future agents can use to set up and run
 the development environment. Base this on the technology stack in app_spec.txt.
@@ -878,7 +957,7 @@ chmod +x init.sh
 
 ---
 
-## TASK 4: Create Project Structure
+## TASK 6: Create Project Structure
 
 Based on app_spec.txt, create the initial directory structure. This varies
 based on the technology stack specified.
@@ -899,7 +978,7 @@ based on the dependencies mentioned in app_spec.txt.
 
 ---
 
-## TASK 5: Initialize Git Repository
+## TASK 7: Initialize Git Repository
 
 ```bash
 git init
