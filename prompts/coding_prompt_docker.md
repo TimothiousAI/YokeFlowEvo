@@ -1378,6 +1378,51 @@ update_task_status({ task_id: 1548, done: true })
 
 **Commit after completing 2-3 related tasks or when epic finishes:**
 
+### Pre-Commit Checklist (CRITICAL - Run Before Every Commit!)
+
+**ALWAYS verify before committing to prevent accidentally tracking large dependency directories:**
+
+```bash
+# 1. Check what's being staged
+bash_docker({ command: "git status" })
+
+# 2. CRITICAL: Verify no dependency directories are staged
+bash_docker({ command: "git diff --cached --name-only | grep -E 'node_modules|venv|\\.venv|__pycache__|dist/|build/' && echo '⚠️  WARNING: Dependencies are staged!' || echo '✅ No dependencies staged'" })
+
+# 3. Check file sizes being committed
+bash_docker({ command: "git diff --cached --stat" })
+
+# 4. Verify .gitignore exists and is comprehensive
+bash_docker({ command: "test -f .gitignore && echo '✅ .gitignore exists' || echo '❌ No .gitignore!'" })
+```
+
+**If you see warnings about staged dependencies:**
+
+```bash
+# Fix: Unstage the problematic directories
+bash_docker({ command: "git reset HEAD node_modules/ venv/ .venv/ __pycache__/ dist/ build/" })
+
+# Ensure they're in .gitignore (use Write tool, NOT bash heredoc!)
+Write({
+  file_path: ".gitignore",
+  content: `# Existing content preserved...
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+dist/
+build/
+`
+})
+
+# Now commit safely
+bash_docker({ command: "git add .gitignore && git commit -m 'Update .gitignore to exclude dependencies' && git add ." })
+```
+
+**After verification passes, commit:**
+
 ```bash
 # No need to cd - already in project root
 git add .

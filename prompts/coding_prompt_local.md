@@ -369,6 +369,54 @@ For each task:
 
 **Commit after completing 2-3 related tasks or when epic finishes:**
 
+### Pre-Commit Checklist (CRITICAL - Run Before Every Commit!)
+
+**ALWAYS verify before committing to prevent accidentally tracking large dependency directories:**
+
+```bash
+# 1. Check what's being staged
+git status
+
+# 2. CRITICAL: Verify no dependency directories are staged
+git diff --cached --name-only | grep -E "node_modules|venv|\.venv|__pycache__|dist/|build/" && echo "⚠️  WARNING: Dependencies are staged!" || echo "✅ No dependencies staged"
+
+# 3. Check file sizes being committed
+git diff --cached --stat
+
+# 4. Verify .gitignore exists and is comprehensive
+test -f .gitignore && echo "✅ .gitignore exists" || echo "❌ No .gitignore!"
+```
+
+**If you see warnings about staged dependencies:**
+
+```bash
+# Fix: Unstage the problematic directories
+git reset HEAD node_modules/
+git reset HEAD venv/
+git reset HEAD .venv/
+git reset HEAD __pycache__/
+git reset HEAD dist/
+git reset HEAD build/
+
+# Ensure they're in .gitignore
+cat >> .gitignore << 'EOF'
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+dist/
+build/
+EOF
+
+# Now commit safely
+git add .gitignore
+git commit -m "Update .gitignore to exclude dependencies"
+git add .
+```
+
+**After verification passes, commit:**
+
 ```bash
 # No need to cd - already in project root
 git add .
