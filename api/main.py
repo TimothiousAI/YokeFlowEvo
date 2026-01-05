@@ -2881,6 +2881,177 @@ async def update_notification_preferences(
 
 
 # =============================================================================
+# Dependency Resolution Endpoints
+# =============================================================================
+
+@app.get("/api/projects/{project_id}/dependencies")
+async def get_dependency_graph(
+    project_id: str,
+    format: str = "json",
+    epic_id: Optional[int] = None,
+    db=Depends(get_db)
+) -> Dict:
+    """Get dependency graph for all tasks."""
+    try:
+        from core.parallel.dependency_resolver import DependencyResolver
+        from core.database_connection import get_tasks
+
+        # Get all tasks for the project
+        tasks = await get_tasks(project_id, epic_id=epic_id)
+
+        # Resolve dependencies
+        resolver = DependencyResolver()
+        graph = resolver.resolve(tasks)
+
+        if format == "mermaid":
+            return {"format": "mermaid", "diagram": resolver.to_mermaid(epic_filter=epic_id)}
+        elif format == "ascii":
+            return {"format": "ascii", "diagram": resolver.to_ascii(epic_filter=epic_id)}
+        else:
+            return {
+                "format": "json",
+                "batches": graph.batches,
+                "task_order": graph.task_order,
+                "circular_deps": graph.circular_deps,
+                "missing_deps": graph.missing_deps
+            }
+
+    except Exception as e:
+        logger.error(f"Error getting dependency graph: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/dependencies/batches")
+async def get_parallel_batches(
+    project_id: str,
+    epic_id: Optional[int] = None,
+    db=Depends(get_db)
+) -> Dict:
+    """Get computed parallel execution batches."""
+    try:
+        from core.parallel.dependency_resolver import DependencyResolver
+        from core.database_connection import get_tasks
+
+        tasks = await get_tasks(project_id, epic_id=epic_id)
+
+        resolver = DependencyResolver()
+        graph = resolver.resolve(tasks)
+
+        return {
+            "batches": graph.batches,
+            "total_batches": len(graph.batches),
+            "batch_sizes": [len(b) for b in graph.batches],
+            "total_tasks": len(tasks)
+        }
+
+    except Exception as e:
+        logger.error(f"Error computing parallel batches: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/dependencies/critical-path")
+async def get_critical_path(
+    project_id: str,
+    epic_id: Optional[int] = None,
+    db=Depends(get_db)
+) -> Dict:
+    """Get critical path (longest dependency chain)."""
+    try:
+        from core.parallel.dependency_resolver import DependencyResolver
+        from core.database_connection import get_tasks
+
+        tasks = await get_tasks(project_id, epic_id=epic_id)
+
+        resolver = DependencyResolver()
+        resolver.resolve(tasks)  # Must resolve first
+        critical_path = resolver.get_critical_path()
+
+        return {
+            "critical_path": critical_path,
+            "length": len(critical_path),
+            "task_ids": critical_path
+        }
+
+    except Exception as e:
+        logger.error(f"Error computing critical path: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/tasks/{task_id}/dependencies")
+async def set_task_dependencies(
+    project_id: str,
+    task_id: int,
+    dependencies: Dict = Body(...),
+    db=Depends(get_db)
+) -> Dict:
+    """Set task dependencies."""
+    try:
+        from core.database_connection import update_task
+
+        depends_on = dependencies.get("depends_on", [])
+        dependency_type = dependencies.get("dependency_type", "hard")
+
+        # Update task metadata with dependencies
+        await update_task(project_id, task_id, {
+            "depends_on": depends_on,
+            "dependency_type": dependency_type
+        })
+
+        return {
+            "status": "success",
+            "task_id": task_id,
+            "depends_on": depends_on,
+            "dependency_type": dependency_type
+        }
+
+    except Exception as e:
+        logger.error(f"Error setting task dependencies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/dependencies/validate")
+async def validate_dependencies(
+    project_id: str,
+    db=Depends(get_db)
+) -> Dict:
+    """Validate all task dependencies."""
+    try:
+        from core.parallel.dependency_resolver import DependencyResolver
+        from core.database_connection import get_tasks
+
+        tasks = await get_tasks(project_id)
+
+        resolver = DependencyResolver()
+        graph = resolver.resolve(tasks)
+
+        issues = []
+        if graph.circular_deps:
+            issues.append({
+                "type": "circular_dependency",
+                "message": f"Found {len(graph.circular_deps)} circular dependency cycle(s)",
+                "details": [list(cycle) for cycle in graph.circular_deps]
+            })
+
+        if graph.missing_deps:
+            issues.append({
+                "type": "missing_dependency",
+                "message": f"Found {len(graph.missing_deps)} task(s) with invalid dependency references",
+                "details": graph.missing_deps
+            })
+
+        return {
+            "valid": len(issues) == 0,
+            "issues": issues,
+            "total_tasks": len(tasks),
+            "tasks_with_dependencies": len([t for t in tasks if t.get("depends_on")])
+        }
+
+    except Exception as e:
+        logger.error(f"Error validating dependencies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Run the API server
 # =============================================================================
 
