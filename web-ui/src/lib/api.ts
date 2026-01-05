@@ -540,6 +540,36 @@ class ApiClient {
     );
     return response.data;
   }
+
+  /**
+   * Start parallel execution for a project
+   */
+  async startParallelExecution(projectId: string): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/projects/${projectId}/parallel/start`
+    );
+    return response.data;
+  }
+
+  /**
+   * Cancel parallel execution for a project
+   */
+  async cancelParallelExecution(projectId: string): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/projects/${projectId}/parallel/cancel`
+    );
+    return response.data;
+  }
+
+  /**
+   * Get parallel execution status
+   */
+  async getParallelStatus(projectId: string): Promise<any> {
+    const response = await this.client.get<any>(
+      `/api/projects/${projectId}/parallel/status`
+    );
+    return response.data;
+  }
 }
 
 // Export singleton instance
