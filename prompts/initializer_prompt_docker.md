@@ -903,11 +903,12 @@ Create a script called `init.sh` that future agents can use to set up and run
 the development environment. Base this on the technology stack in app_spec.txt.
 
 **The script should:**
-1. Check for .env file (copy from .env.example if missing)
-2. Install dependencies (npm, pip, etc. as needed)
-3. Initialize databases if needed
-4. Start development servers
-5. Print helpful information about accessing the app
+1. **Check for .gitignore file and create if missing (CRITICAL - must be first!)**
+2. Check for .env file (copy from .env.example if missing)
+3. Install dependencies (npm, pip, etc. as needed)
+4. Initialize databases if needed
+5. Start development servers
+6. Print helpful information about accessing the app
 
 **Example structure:**
 
@@ -918,6 +919,74 @@ the development environment. Base this on the technology stack in app_spec.txt.
 set -e
 
 echo "🚀 Setting up project..."
+
+# CRITICAL: Check for .gitignore BEFORE any operations
+if [ ! -f .gitignore ]; then
+    echo "📝 Creating .gitignore file..."
+    cat > .gitignore << 'EOF'
+# Dependencies
+node_modules/
+venv/
+.venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+.next/
+out/
+
+# Testing
+coverage/
+.nyc_output/
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+EOF
+    echo "✅ Created .gitignore with standard exclusions"
+
+    # Commit .gitignore immediately if git repo exists
+    if [ -d .git ]; then
+        git add .gitignore
+        git commit -m "Add comprehensive .gitignore" || true
+        echo "✅ Committed .gitignore to git"
+    fi
+fi
 
 # Environment setup
 if [ ! -f .env ]; then
