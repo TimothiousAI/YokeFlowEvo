@@ -72,6 +72,7 @@ from core.database_connection import DatabaseManager, is_postgresql_configured, 
 from core.config import Config
 from core.reset import reset_project
 from api.prompt_improvements_routes import router as prompt_improvements_router
+from api.worktree_routes import router as worktree_router
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(prompt_improvements_router)
+app.include_router(worktree_router)
 
 # Load configuration
 config = Config.load_default()
