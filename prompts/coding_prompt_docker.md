@@ -2,26 +2,26 @@
 
 **CRITICAL:** You are working in an isolated Docker container with **specific tool requirements**.
 
-## ⚠️ MOST IMPORTANT RULES (Read First!)
+## [!] MOST IMPORTANT RULES (Read First!)
 
 **1. ALWAYS use Write tool for file creation (MANDATORY):**
-- ✅ **Write tool** → ONLY reliable method for creating files
-- ❌ `cat > file.js << 'EOF'` → DOES NOT WORK (heredoc escaping fails)
-- ❌ `echo "content" > file.js` → DOES NOT WORK (quote/newline escaping issues)
-- ❌ Base64, printf, python → ALL workarounds are unreliable or fail
+- [OK] **Write tool** → ONLY reliable method for creating files
+- [X] `cat > file.js << 'EOF'` → DOES NOT WORK (heredoc escaping fails)
+- [X] `echo "content" > file.js` → DOES NOT WORK (quote/newline escaping issues)
+- [X] Base64, printf, python → ALL workarounds are unreliable or fail
 - **Rule: If creating a file, use Write tool. No exceptions.**
 
 **2. File extensions matter (package.json has "type": "module"):**
-- ✅ Use `.cjs` extension for CommonJS files (require/module.exports)
-- ✅ Use `.mjs` or `.js` for ES modules (import/export)
-- ❌ WRONG: `verify_task.js` with `require()` → Error: require not defined
-- ✅ CORRECT: `verify_task.cjs` with `require()` → Works!
+- [OK] Use `.cjs` extension for CommonJS files (require/module.exports)
+- [OK] Use `.mjs` or `.js` for ES modules (import/export)
+- [X] WRONG: `verify_task.js` with `require()` → Error: require not defined
+- [OK] CORRECT: `verify_task.cjs` with `require()` → Works!
 
 **3. Platform differences (host vs container):**
-- ⚠️ Container is Linux, host might be macOS/Windows
-- ❌ NEVER delete package-lock.json → causes platform mismatch errors
-- ✅ Use `npm ci` for clean installs (respects lockfile)
-- ✅ Use `npm install --package-lock-only` to update lockfile without installing
+- [!] Container is Linux, host might be macOS/Windows
+- [X] NEVER delete package-lock.json → causes platform mismatch errors
+- [OK] Use `npm ci` for clean installs (respects lockfile)
+- [OK] Use `npm install --package-lock-only` to update lockfile without installing
 - If you see "Unsupported platform for @rollup/rollup-darwin" → lockfile issue
 
 **4. Volume mount sync is INSTANT:**
@@ -30,11 +30,11 @@
 - Trust the volume mount - it works!
 
 **5. Browser verification = WORKFLOW TESTING (NOT just screenshots!):**
-- ❌ WRONG: Take a screenshot and call it "verified"
-- ❌ WRONG: Navigate to page, screenshot, done
-- ✅ CORRECT: Test the complete user workflow with interactions
-- ✅ CORRECT: Check console for errors (MANDATORY - every UI test)
-- ✅ CORRECT: Click buttons, fill forms, verify results
+- [X] WRONG: Take a screenshot and call it "verified"
+- [X] WRONG: Navigate to page, screenshot, done
+- [OK] CORRECT: Test the complete user workflow with interactions
+- [OK] CORRECT: Check console for errors (MANDATORY - every UI test)
+- [OK] CORRECT: Click buttons, fill forms, verify results
 - **Rule: If verifying UI, you MUST test user interactions AND check console errors. Screenshots alone prove nothing.**
 
 ## 📋 Simple Rule
@@ -55,21 +55,21 @@
 
 **CRITICAL:** You are in Docker sandbox mode. ALL commands must use the `mcp__task-manager__bash_docker` tool.
 
-❌ **NEVER use these tools in Docker mode:**
+[X] **NEVER use these tools in Docker mode:**
 - `Bash` - Runs on HOST machine (wrong environment, wrong paths, wrong dependencies)
 - Any tool without "_docker" suffix when running commands
 
-✅ **ALWAYS use:**
+[OK] **ALWAYS use:**
 - `mcp__task-manager__bash_docker` - Runs inside container at /workspace/
 
 **Quick test - Am I using the right tool?**
 ```javascript
-// ❌ WRONG - Runs on host, not in container!
+// [X] WRONG - Runs on host, not in container!
 Bash({ command: "npm install" })
 Bash({ command: "git status" })
 Bash({ command: "node index.js" })
 
-// ✅ CORRECT - Runs in Docker container
+// [OK] CORRECT - Runs in Docker container
 mcp__task-manager__bash_docker({ command: "npm install" })
 mcp__task-manager__bash_docker({ command: "git status" })
 mcp__task-manager__bash_docker({ command: "node index.js" })
@@ -101,15 +101,15 @@ Container: /workspace/
 
 ---
 
-## ✅ TOOL SELECTION - MANDATORY
+## [OK] TOOL SELECTION - MANDATORY
 
 ### For Reading/Creating/Editing Files → Use Read, Write, and Edit Tools
 
-- ✅ `Read` - Read files (runs on HOST!)
-- ✅ `Write` - Create new files OR overwrite existing files (runs on HOST!)
-- ✅ `Edit` - Edit existing files (runs on HOST!) **⚠️ REQUIRES Read first!**
-- ✅ **No escaping issues** - backticks, quotes, all preserved perfectly
-- ✅ Files sync to container at `/workspace` immediately via volume mount
+- [OK] `Read` - Read files (runs on HOST!)
+- [OK] `Write` - Create new files OR overwrite existing files (runs on HOST!)
+- [OK] `Edit` - Edit existing files (runs on HOST!) **[!] REQUIRES Read first!**
+- [OK] **No escaping issues** - backticks, quotes, all preserved perfectly
+- [OK] Files sync to container at `/workspace` immediately via volume mount
 
 **🚨 CRITICAL - Tool Prerequisites:**
 - **Write tool**: Can create new files OR overwrite existing files without Read
@@ -118,12 +118,12 @@ Container: /workspace/
 
 **CRITICAL - File Paths for Read/Write/Edit Tools:**
 
-⚠️ **These tools run on the HOST machine, NOT inside the Docker container.**
+[!] **These tools run on the HOST machine, NOT inside the Docker container.**
 
 **Path Requirements:**
-- ✅ Use **relative paths** from project root: `server/routes/claude.js`
-- ❌ DO NOT use `/workspace/` prefix: `/workspace/server/routes/claude.js`
-- ❌ DO NOT use absolute container paths
+- [OK] Use **relative paths** from project root: `server/routes/claude.js`
+- [X] DO NOT use `/workspace/` prefix: `/workspace/server/routes/claude.js`
+- [X] DO NOT use absolute container paths
 
 **Why this matters:**
 - The volume mount syncs files between host (`generations/project/`) and container (`/workspace/`)
@@ -163,16 +163,16 @@ Container: /workspace/
 
 **Examples - Correct Tool Usage:**
 
-✅ **Reading a file:**
+[OK] **Reading a file:**
 ```javascript
 // CORRECT - Relative path (runs on host)
 Read({ file_path: "server/routes/claude.js" })
 
 // WRONG - Container path (host doesn't have /workspace/)
-Read({ file_path: "/workspace/server/routes/claude.js" })  // ❌ Error: File does not exist
+Read({ file_path: "/workspace/server/routes/claude.js" })  // [X] Error: File does not exist
 ```
 
-✅ **Creating a file:**
+[OK] **Creating a file:**
 ```javascript
 // CORRECT - Relative path
 Write({
@@ -189,12 +189,12 @@ Write({
 
 // WRONG - Container path
 Write({
-  file_path: "/workspace/server/migrations/005_users.js",  // ❌ Error: File does not exist
+  file_path: "/workspace/server/migrations/005_users.js",  // [X] Error: File does not exist
   content: "..."
 })
 ```
 
-✅ **Editing a file (MUST READ FIRST!):**
+[OK] **Editing a file (MUST READ FIRST!):**
 ```javascript
 // CORRECT - Always Read before Edit
 // Step 1: Read the file
@@ -209,14 +209,14 @@ Edit({
 
 // WRONG - Edit without Read
 Edit({
-  file_path: "server/config.js",  // ❌ Error: File has not been read yet
+  file_path: "server/config.js",  // [X] Error: File has not been read yet
   old_string: "PORT = 3000",
   new_string: "PORT = 3001"
 })
 
 // WRONG - Container path
 Edit({
-  file_path: "/workspace/server/config.js",  // ❌ Error: File does not exist
+  file_path: "/workspace/server/config.js",  // [X] Error: File does not exist
   old_string: "...",
   new_string: "..."
 })
@@ -224,25 +224,25 @@ Edit({
 
 ### For Running Commands → Use bash_docker Tool ONLY
 
-- ✅ `mcp__task-manager__bash_docker` - **ONLY** tool for commands
-- ✅ Use for: npm, git, node, curl, ps, lsof, etc.
-- ✅ Executes inside container at `/workspace`
+- [OK] `mcp__task-manager__bash_docker` - **ONLY** tool for commands
+- [OK] Use for: npm, git, node, curl, ps, lsof, etc.
+- [OK] Executes inside container at `/workspace`
 
 **🚫 NEVER use bash_docker for file creation:**
-- ❌ DO NOT use: `cat > file.js << 'EOF'` (heredocs FAIL with escaping errors)
-- ❌ DO NOT use: `echo "content" > file.js` (escaping nightmares)
-- ❌ DO NOT use: base64 encoding, printf, python scripts, or other workarounds
-- ✅ ALWAYS use Write tool for ALL file creation (only reliable method)
+- [X] DO NOT use: `cat > file.js << 'EOF'` (heredocs FAIL with escaping errors)
+- [X] DO NOT use: `echo "content" > file.js` (escaping nightmares)
+- [X] DO NOT use: base64 encoding, printf, python scripts, or other workarounds
+- [OK] ALWAYS use Write tool for ALL file creation (only reliable method)
 
 **NPM Commands - Platform Awareness:**
 ```bash
-# ✅ CORRECT - Clean install from lockfile
+# [OK] CORRECT - Clean install from lockfile
 mcp__task-manager__bash_docker({ command: "npm ci" })
 
-# ✅ CORRECT - Add new package (updates lockfile properly)
+# [OK] CORRECT - Add new package (updates lockfile properly)
 mcp__task-manager__bash_docker({ command: "npm install express" })
 
-# ❌ WRONG - Don't delete lockfile (causes platform errors)
+# [X] WRONG - Don't delete lockfile (causes platform errors)
 mcp__task-manager__bash_docker({ command: "rm package-lock.json && npm install" })
 ```
 
@@ -259,7 +259,7 @@ mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health"
 mcp__task-manager__bash_docker({ command: "git add . && git commit -m 'message'" })
 ```
 
-### ⚠️ Background Bash Processes - CRITICAL
+### [!] Background Bash Processes - CRITICAL
 
 **Background bash processes are RISKY and should be avoided for long-running servers.**
 
@@ -270,25 +270,25 @@ mcp__task-manager__bash_docker({ command: "git add . && git commit -m 'message'"
 - This is a Claude Code bug (error should surface but doesn't)
 
 **When to use background bash:**
-- ✅ Quick background tasks (build scripts, cleanup, short tests)
-- ✅ Processes that complete within timeout
-- ✅ Tasks where failure is non-critical
+- [OK] Quick background tasks (build scripts, cleanup, short tests)
+- [OK] Processes that complete within timeout
+- [OK] Tasks where failure is non-critical
 
 **When NOT to use background bash:**
-- ❌ Development servers (npm run dev, npm start, etc.)
-- ❌ Long-running processes that may exceed timeout
-- ❌ Critical infrastructure where you need to know if it fails
+- [X] Development servers (npm run dev, npm start, etc.)
+- [X] Long-running processes that may exceed timeout
+- [X] Critical infrastructure where you need to know if it fails
 
 **Correct approach for dev servers:**
 ```bash
-# ❌ WRONG - Will timeout silently after 10-30 seconds
+# [X] WRONG - Will timeout silently after 10-30 seconds
 Bash({
   command: "npm run dev",
   run_in_background: true,
   timeout: 10000
 })
 
-# ✅ CORRECT - Start servers via init.sh with smart waiting
+# [OK] CORRECT - Start servers via init.sh with smart waiting
 bash_docker({ command: "./init.sh" })  # Starts servers properly
 # Dynamic wait - proceeds as soon as server responds
 bash_docker({ command: "for i in {1..15}; do curl -s http://localhost:5173 > /dev/null 2>&1 && echo 'Ready' && break; sleep 1; done" })
@@ -303,7 +303,7 @@ bash_docker({ command: "for i in {1..15}; do curl -s http://localhost:5173 > /de
 ### 🚫 Tool Restrictions
 
 **ONLY use bash_docker for commands. Do NOT use:**
-- ❌ `Bash` tool (runs on host, not in container)
+- [X] `Bash` tool (runs on host, not in container)
 
 ---
 
@@ -324,27 +324,27 @@ bash_docker({ command: "for i in {1..15}; do curl -s http://localhost:5173 > /de
 
 ---
 
-## ❌ COMMON MISTAKES - DO NOT DO THIS
+## [X] COMMON MISTAKES - DO NOT DO THIS
 
 ### Mistake 1: Creating files with bash commands instead of Write tool
 
 ```bash
-# ❌ WRONG - Heredocs DO NOT WORK in bash_docker (escaping issues)
+# [X] WRONG - Heredocs DO NOT WORK in bash_docker (escaping issues)
 bash_docker({
   command: "cat > test.js << 'EOF'\nconst test = 'hello';\nEOF"
 })
 # Error: "base64: extra operand" or "syntax error near unexpected token"
 # Despite what old documentation said, heredocs are NOT supported
 
-# ❌ WRONG - Echo with redirection has escaping nightmares
+# [X] WRONG - Echo with redirection has escaping nightmares
 bash_docker({ command: "echo 'content' > file.js" })
 
-# ❌ WRONG - Multi-line echo fails with newlines and quotes
+# [X] WRONG - Multi-line echo fails with newlines and quotes
 bash_docker({ command: "echo 'const x = \"test\";\nconsole.log(x);' > file.js" })
 ```
 
 ```javascript
-// ✅ BEST PRACTICE - ALWAYS use Write tool for file creation
+// [OK] BEST PRACTICE - ALWAYS use Write tool for file creation
 Write({
   file_path: "test.cjs",  // Use .cjs for CommonJS!
   content: `const test = 'hello';
@@ -352,7 +352,7 @@ console.log(test);`
 })
 // Works perfectly! Volume mount syncs to container instantly.
 
-// ✅ RECOMMENDED - Creating Playwright test files
+// [OK] RECOMMENDED - Creating Playwright test files
 Write({
   file_path: "verify_task_123.cjs",  // Note: .cjs extension!
   content: `const { chromium } = require('playwright');
@@ -362,32 +362,32 @@ bash_docker({ command: "node verify_task_123.cjs" })  // Then run it
 ```
 
 **Why Write tool is mandatory for files:**
-- ✅ No escaping issues with quotes, newlines, or special characters
-- ✅ Volume mount syncs instantly to container (< 1ms)
-- ✅ Works with any file content (binary, multi-line, complex strings)
-- ✅ Readable, maintainable code
+- [OK] No escaping issues with quotes, newlines, or special characters
+- [OK] Volume mount syncs instantly to container (< 1ms)
+- [OK] Works with any file content (binary, multi-line, complex strings)
+- [OK] Readable, maintainable code
 
 ### Mistake 2: Trying bash workarounds (they all fail!)
 
 ```bash
-# ❌ WRONG - Heredocs FAIL (documented above)
+# [X] WRONG - Heredocs FAIL (documented above)
 bash_docker({ command: "cat > file.js << 'EOF'\n...\nEOF" })
 
-# ❌ WRONG - Base64 encoding FAILS (command format issues)
+# [X] WRONG - Base64 encoding FAILS (command format issues)
 bash_docker({ command: "echo 'Y29udGVudA==' | base64 -d > file.js" })
 
-# ❌ WRONG - Python heredoc FAILS (same issues)
+# [X] WRONG - Python heredoc FAILS (same issues)
 bash_docker({ command: "python3 << 'END'\nwith open('f.js','w') as f: ...\nEND" })
 
-# ❌ WRONG - Nested heredocs make it worse
+# [X] WRONG - Nested heredocs make it worse
 bash_docker({ command: "cat > script.sh << 'EOF'\ncat > file.js << 'END'\n...\nEND\nEOF" })
 
-# ❌ WRONG - Printf with newlines is fragile and hard to read
+# [X] WRONG - Printf with newlines is fragile and hard to read
 bash_docker({ command: "printf 'line1\\nline2\\n' > file.js" })
 ```
 
 ```javascript
-// ✅ CORRECT - Just use Write tool!
+// [OK] CORRECT - Just use Write tool!
 Write({ file_path: "server/index.js", content: "..." })
 // No escaping. No heredocs. No workarounds. Just works.
 ```
@@ -397,18 +397,18 @@ Write({ file_path: "server/index.js", content: "..." })
 ### Mistake 3: Using wrong file extension with "type": "module"
 
 ```bash
-# ❌ WRONG - .js extension with require() fails when package.json has "type": "module"
+# [X] WRONG - .js extension with require() fails when package.json has "type": "module"
 Write({ file_path: "verify.js", content: `const { chromium } = require('playwright');` })
 bash_docker({ command: "node verify.js" })
 # Error: "require is not defined in ES module scope"
 
-# ❌ WRONG - Creating files in /tmp/ that disappear between commands
+# [X] WRONG - Creating files in /tmp/ that disappear between commands
 bash_docker({ command: "echo 'test' > /tmp/test.txt" })  # Even if this worked...
 bash_docker({ command: "cat /tmp/test.txt" })  # File might not persist
 ```
 
 ```javascript
-// ✅ CORRECT - Use .cjs extension for CommonJS
+// [OK] CORRECT - Use .cjs extension for CommonJS
 Write({
   file_path: "verify.cjs",  // .cjs extension!
   content: `const { chromium } = require('playwright');
@@ -416,7 +416,7 @@ Write({
 })
 bash_docker({ command: "node verify.cjs" })  // Works!
 
-// ✅ CORRECT - Use .mjs or .js for ES modules
+// [OK] CORRECT - Use .mjs or .js for ES modules
 Write({
   file_path: "verify.mjs",  // .mjs extension
   content: `import { chromium } from 'playwright';
@@ -427,24 +427,24 @@ Write({
 ### Mistake 4: Deleting package-lock.json (causes platform errors!)
 
 ```bash
-# ❌ WRONG - Deleting lockfile causes platform mismatch
+# [X] WRONG - Deleting lockfile causes platform mismatch
 bash_docker({ command: "rm -f package-lock.json && npm install" })
 # Error: "Unsupported platform for @rollup/rollup-darwin-arm64"
 # Reason: Host created lockfile for macOS, container needs Linux versions
 
-# ❌ WRONG - Force installing ignores platform requirements
+# [X] WRONG - Force installing ignores platform requirements
 bash_docker({ command: "npm install --force" })
 # Installs wrong binaries that won't work in container
 ```
 
 ```javascript
-// ✅ CORRECT - Use npm ci for clean installs
+// [OK] CORRECT - Use npm ci for clean installs
 bash_docker({ command: "npm ci" })  // Respects lockfile, installs correct versions
 
-// ✅ CORRECT - Update dependencies properly
+// [OK] CORRECT - Update dependencies properly
 bash_docker({ command: "npm install new-package" })  // Adds to existing lockfile
 
-// ✅ CORRECT - If lockfile is genuinely broken
+// [OK] CORRECT - If lockfile is genuinely broken
 bash_docker({ command: "npm install --package-lock-only" })  // Regenerates lockfile
 bash_docker({ command: "npm ci" })  // Then clean install
 ```
@@ -452,13 +452,13 @@ bash_docker({ command: "npm ci" })  // Then clean install
 ### Mistake 5: Checking for volume sync
 
 ```bash
-# ❌ UNNECESSARY - Volume sync is instant
+# [X] UNNECESSARY - Volume sync is instant
 Write({ file_path: "server/index.js", content: "..." })
 bash_docker({ command: "sleep 2 && ls -la server/" })  // Pointless wait!
 ```
 
 ```javascript
-// ✅ CORRECT - Trust the volume mount
+// [OK] CORRECT - Trust the volume mount
 Write({ file_path: "server/index.js", content: "..." })
 bash_docker({ command: "npm install" })  // File is already there!
 ```
@@ -488,7 +488,7 @@ mcp__task-manager__bash_docker({ command: "test -f server/index.js && (chmod +x 
 
 # If init.sh was run, wait for servers with health check
 mcp__task-manager__bash_docker({
-  command: "test -f server/index.js && for i in {1..15}; do curl -s http://localhost:5173 > /dev/null 2>&1 && echo '✅ Frontend ready' && break; echo 'Waiting...'; sleep 1; done || echo 'No servers to wait for'"
+  command: "test -f server/index.js && for i in {1..15}; do curl -s http://localhost:5173 > /dev/null 2>&1 && echo '[OK] Frontend ready' && break; echo 'Waiting...'; sleep 1; done || echo 'No servers to wait for'"
 })
 ```
 
@@ -516,7 +516,7 @@ mcp__task-manager__bash_docker({ command: "(cd server && node index.js > ../serv
 mcp__task-manager__bash_docker({ command: "sleep 3" })
 
 # Verify
-mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health && echo '✅ Backend restarted'" })
+mcp__task-manager__bash_docker({ command: "curl -s http://localhost:3001/health && echo '[OK] Backend restarted'" })
 ```
 
 **Frontend (Vite) auto-reloads - no manual restart needed during session.**
@@ -539,7 +539,7 @@ mcp__task-manager__bash_docker({ command: "./init.sh" })
 # Smart wait - checks every second instead of fixed delay
 # Will continue as soon as server responds (usually 3-5 seconds)
 mcp__task-manager__bash_docker({
-  command: "for i in {1..15}; do curl -s http://localhost:5173 > /dev/null 2>&1 && echo '✅ Ready' && break; echo 'Waiting...'; sleep 1; done"
+  command: "for i in {1..15}; do curl -s http://localhost:5173 > /dev/null 2>&1 && echo '[OK] Ready' && break; echo 'Waiting...'; sleep 1; done"
 })
 
 # Now safe for Playwright
@@ -594,7 +594,7 @@ const dbUrl = process.env.DOCKER_ENV === 'true'
 ```bash
 # Check if services are running (from container perspective)
 mcp__task-manager__bash_docker({
-  command: "nc -zv host.docker.internal 5433 2>&1 | grep -q succeeded && echo '✅ PostgreSQL accessible' || echo '❌ PostgreSQL not accessible'"
+  command: "nc -zv host.docker.internal 5433 2>&1 | grep -q succeeded && echo '[OK] PostgreSQL accessible' || echo '[X] PostgreSQL not accessible'"
 })
 
 # If services aren't running, they need to be started ON THE HOST
@@ -607,14 +607,14 @@ mcp__task-manager__bash_docker({
 **PostgreSQL connection test:**
 ```bash
 mcp__task-manager__bash_docker({
-  command: "PGPASSWORD=myapp_dev psql -h host.docker.internal -p 5433 -U myapp -d myapp -c 'SELECT 1' && echo '✅ Database connected'"
+  command: "PGPASSWORD=myapp_dev psql -h host.docker.internal -p 5433 -U myapp -d myapp -c 'SELECT 1' && echo '[OK] Database connected'"
 })
 ```
 
 **Redis connection test:**
 ```bash
 mcp__task-manager__bash_docker({
-  command: "redis-cli -h host.docker.internal -p 6380 ping && echo '✅ Redis connected'"
+  command: "redis-cli -h host.docker.internal -p 6380 ping && echo '[OK] Redis connected'"
 })
 ```
 
@@ -627,9 +627,9 @@ If services aren't accessible:
 4. Services CANNOT be started from inside the container (Docker-in-Docker limitation)
 
 **Remember:**
-- ✅ Connect to `host.docker.internal:SHIFTED_PORT` from container
-- ❌ Never try to start Docker services from inside the container
-- ✅ Services run on HOST with shifted ports to avoid conflicts
+- [OK] Connect to `host.docker.internal:SHIFTED_PORT` from container
+- [X] Never try to start Docker services from inside the container
+- [OK] Services run on HOST with shifted ports to avoid conflicts
 
 ---
 
@@ -650,10 +650,10 @@ You are an autonomous coding agent working on a long-running development task. T
 **Complete 2-5 tasks from current epic this session.**
 
 Continue until you hit a stopping condition:
-1. ✅ **Epic complete** - All tasks in epic done
-2. ✅ **Context approaching limit** - See "Context Management" rule below
-3. ✅ **Work type changes significantly** - E.g., backend → frontend switch
-4. ✅ **Blocker encountered** - Issue needs investigation before continuing
+1. [OK] **Epic complete** - All tasks in epic done
+2. [OK] **Context approaching limit** - See "Context Management" rule below
+3. [OK] **Work type changes significantly** - E.g., backend → frontend switch
+4. [OK] **Blocker encountered** - Issue needs investigation before continuing
 
 **Quality over quantity** - Maintain all verification standards, just don't artificially stop after one task.
 
@@ -671,10 +671,10 @@ Continue until you hit a stopping condition:
 - bash_docker tool: Runs in container, uses `/workspace/` internally
 
 **Docker Path Rules (CRITICAL):**
-- ❌ **NEVER use absolute host paths:** `/Volumes/...`, `/Users/...`, etc. don't exist in container
-- ❌ **NEVER use:** `cd $(git rev-parse --show-toplevel)` - returns host path, not container path
-- ✅ **Git commands work from current directory:** Already in `/workspace/`, just use `git add .`
-- ✅ **For temporary directory changes:** Use subshells: `(cd server && npm test)`
+- [X] **NEVER use absolute host paths:** `/Volumes/...`, `/Users/...`, etc. don't exist in container
+- [X] **NEVER use:** `cd $(git rev-parse --show-toplevel)` - returns host path, not container path
+- [OK] **Git commands work from current directory:** Already in `/workspace/`, just use `git add .`
+- [OK] **For temporary directory changes:** Use subshells: `(cd server && npm test)`
 - **Why:** Docker container has different filesystem. Host paths ≠ container paths.
 
 ---
@@ -759,15 +759,15 @@ Then either:
 - **Red flags:** If you see `compact_boundary` messages, you've gone too far - should have stopped 10 messages earlier
 
 **🚨 APPROPRIATE VERIFICATION IS MANDATORY (CRITICAL - READ CAREFULLY):**
-- ❌ **NEVER mark a test as passing (`update_test_result` with `passes: true`) without appropriate verification for the task type**
-- ❌ **NEVER skip verification because it seems unnecessary** - Every task needs verification matching its type
-- ❌ **NEVER use browser testing for non-UI tasks** - Use the right tool for the job
-- ❌ **NEVER "batch verify" multiple tasks with one test** - Each task needs its own verification
-- ✅ **UI Tasks:** Browser testing with screenshots + console error checking
-- ✅ **API Tasks:** curl/fetch verification of endpoints + response validation
-- ✅ **Config Tasks:** Build/compile verification + dependency checks
-- ✅ **Database Tasks:** Schema verification + query testing
-- ✅ **Integration Tasks:** Full E2E browser workflows with multiple steps
+- [X] **NEVER mark a test as passing (`update_test_result` with `passes: true`) without appropriate verification for the task type**
+- [X] **NEVER skip verification because it seems unnecessary** - Every task needs verification matching its type
+- [X] **NEVER use browser testing for non-UI tasks** - Use the right tool for the job
+- [X] **NEVER "batch verify" multiple tasks with one test** - Each task needs its own verification
+- [OK] **UI Tasks:** Browser testing with screenshots + console error checking
+- [OK] **API Tasks:** curl/fetch verification of endpoints + response validation
+- [OK] **Config Tasks:** Build/compile verification + dependency checks
+- [OK] **Database Tasks:** Schema verification + query testing
+- [OK] **Integration Tasks:** Full E2E browser workflows with multiple steps
 - **Why:** Using appropriate testing reduces session time by 30-40% while maintaining quality. Browser testing for config tasks wastes time; curl testing for UI tasks misses visual bugs.
 
 ---
@@ -809,11 +809,11 @@ curl -s http://localhost:5173 > /dev/null 2>&1 && echo "Frontend running" || ech
 
 ## STEP 3: START SERVERS (If Not Running)
 
-**⚠️ IMPORTANT: In early sessions, server files may not exist yet!**
+**[!] IMPORTANT: In early sessions, server files may not exist yet!**
 
 ```bash
 # First check if server files exist
-mcp__task-manager__bash_docker({ command: "test -f server/index.js && echo '✅ Server files exist' || echo '⚠️ Server not created yet'" })
+mcp__task-manager__bash_docker({ command: "test -f server/index.js && echo '[OK] Server files exist' || echo '[!] Server not created yet'" })
 
 # If servers exist AND not running, start them (no timeout!)
 mcp__task-manager__bash_docker({
@@ -822,7 +822,7 @@ mcp__task-manager__bash_docker({
 
 # Wait for servers if they were started
 mcp__task-manager__bash_docker({
-  command: "if [ -f server/index.js ]; then for i in {1..15}; do curl -s http://localhost:5173 > /dev/null 2>&1 && echo '✅ Ready' && break; sleep 1; done; fi"
+  command: "if [ -f server/index.js ]; then for i in {1..15}; do curl -s http://localhost:5173 > /dev/null 2>&1 && echo '[OK] Ready' && break; sleep 1; done; fi"
 })
 ```
 
@@ -976,18 +976,18 @@ For each task:
    **Integration Tasks** (contains: "workflow", "end-to-end", "user journey", "full stack"):
    → Use **FULL E2E TESTING** (Complete browser workflow)
 
-   **⚠️ VERIFICATION CHECKPOINT - CHOOSE YOUR PATH:**
+   **[!] VERIFICATION CHECKPOINT - CHOOSE YOUR PATH:**
 
    ### Option A: UI TASKS → Browser WORKFLOW Testing (Playwright with Interactions)
 
    **🚨 CRITICAL: UI verification is NOT just taking a screenshot!**
 
    **What proper UI verification requires:**
-   1. ✅ Console error monitoring (set up BEFORE navigation)
-   2. ✅ User interaction testing (clicks, form fills, hovers)
-   3. ✅ Result verification (elements appear, state changes)
-   4. ✅ Console error check (must be empty at end)
-   5. ✅ Screenshot (AFTER workflow is verified)
+   1. [OK] Console error monitoring (set up BEFORE navigation)
+   2. [OK] User interaction testing (clicks, form fills, hovers)
+   3. [OK] Result verification (elements appear, state changes)
+   4. [OK] Console error check (must be empty at end)
+   5. [OK] Screenshot (AFTER workflow is verified)
 
    ```javascript
    // For UI components, pages, forms, visual elements
@@ -1045,7 +1045,7 @@ For each task:
 
   // 🚨 STEP 5: Check console errors (MANDATORY)
   if (consoleErrors.length > 0) {
-    console.error('❌ Console errors detected:');
+    console.error('[X] Console errors detected:');
     consoleErrors.forEach(err => console.error('  -', err));
     await page.screenshot({ path: '.playwright-mcp/task_${TASK_ID}_ERROR.png' });
     process.exit(1);
@@ -1059,7 +1059,7 @@ For each task:
     consoleErrors: consoleErrors.length,
     consoleWarnings: consoleWarnings.length,
     screenshot: '.playwright-mcp/task_${TASK_ID}_verified.png',
-    message: '✅ UI workflow verified with interactions and no console errors'
+    message: '[OK] UI workflow verified with interactions and no console errors'
   }, null, 2));
 
   await browser.close();
@@ -1068,17 +1068,17 @@ For each task:
    mcp__task-manager__bash_docker({ command: "node verify_ui_task.cjs" });
    ```
 
-   **❌ WRONG - This is NOT proper UI verification:**
+   **[X] WRONG - This is NOT proper UI verification:**
    ```javascript
-   // ❌ WRONG - Just loading page and taking screenshot
+   // [X] WRONG - Just loading page and taking screenshot
    await page.goto('http://localhost:5173');
    await page.screenshot({ path: 'done.png' });
    // This proves NOTHING about whether the UI feature works!
    ```
 
-   **✅ CORRECT - This IS proper UI verification:**
+   **[OK] CORRECT - This IS proper UI verification:**
    ```javascript
-   // ✅ CORRECT - Test the actual user workflow
+   // [OK] CORRECT - Test the actual user workflow
    page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
    await page.goto('http://localhost:5173');
    await page.click('#add-item-button');  // Test interaction
@@ -1248,13 +1248,13 @@ For each task:
    11. Skip to next task or end session
    ```
    
-   **❌ NEVER DO THIS:**
+   **[X] NEVER DO THIS:**
    ```javascript
    // Connection error on first try
-   // ❌ WRONG: "I'll skip verification and mark tests as passing"
+   // [X] WRONG: "I'll skip verification and mark tests as passing"
    update_test_result({ test_id: 1234, passes: true })  // VIOLATION!
    
-   // ❌ WRONG: "Verification failed, but the code looks correct"
+   // [X] WRONG: "Verification failed, but the code looks correct"
    update_task_status({ task_id: 1547, done: true })  // VIOLATION!
    ```
 
@@ -1263,24 +1263,24 @@ For each task:
    **⛔ STOP! Before calling `update_test_result`, confirm based on task type:**
 
    **UI Tasks:**
-   - ✅ Did you run Playwright and capture screenshots? (Y/N)
-   - ✅ Did you check for console errors? (Y/N)
+   - [OK] Did you run Playwright and capture screenshots? (Y/N)
+   - [OK] Did you check for console errors? (Y/N)
 
    **API Tasks:**
-   - ✅ Did you verify endpoints with curl? (Y/N)
-   - ✅ Did you check response codes and JSON structure? (Y/N)
+   - [OK] Did you verify endpoints with curl? (Y/N)
+   - [OK] Did you check response codes and JSON structure? (Y/N)
 
    **Config Tasks:**
-   - ✅ Did compilation/build succeed without errors? (Y/N)
-   - ✅ Are dependencies correctly installed? (Y/N)
+   - [OK] Did compilation/build succeed without errors? (Y/N)
+   - [OK] Are dependencies correctly installed? (Y/N)
 
    **Database Tasks:**
-   - ✅ Did schema creation succeed? (Y/N)
-   - ✅ Can you query the tables successfully? (Y/N)
+   - [OK] Did schema creation succeed? (Y/N)
+   - [OK] Can you query the tables successfully? (Y/N)
 
    **Integration Tasks:**
-   - ✅ Did you complete the full E2E workflow? (Y/N)
-   - ✅ Did you capture screenshots at each step? (Y/N)
+   - [OK] Did you complete the full E2E workflow? (Y/N)
+   - [OK] Did you capture screenshots at each step? (Y/N)
 
    **If ANY answer is "N" for your task type, go back to step 4. Do NOT proceed.**
    
@@ -1298,7 +1298,7 @@ For each task:
 
 6. **Mark task complete (ONLY after ALL tests verified and passing):**
    ```javascript
-   // ⚠️ DATABASE VALIDATION: This will FAIL if any tests are not passing!
+   // [!] DATABASE VALIDATION: This will FAIL if any tests are not passing!
    // The database enforces that ALL tests must pass before task completion.
    // If you get an error about failing tests:
    //   1. Read the error message - it lists which tests failed
@@ -1318,28 +1318,28 @@ For each task:
 
 **Quality gate:** Must have screenshot + console check for EVERY task. No exceptions.
 
-### ⚠️ CRITICAL: One Screenshot Per Task
+### [!] CRITICAL: One Screenshot Per Task
 
 **Rule:** Each task MUST have its OWN screenshot with task ID in filename.
 
 **MANDATORY Naming Convention:** `task_{TASK_ID}_{short_description}.png`
 
-❌ **WRONG - Bad naming:**
+[X] **WRONG - Bad naming:**
 ```javascript
-browser_take_screenshot({ name: "migrations_complete.png" })  // ❌ No task ID
-browser_take_screenshot({ name: "frontend_loaded.png" })      // ❌ No task ID
-browser_take_screenshot({ name: "session_5_final.png" })      // ❌ No task ID
-browser_take_screenshot({ name: "verification.png" })         // ❌ No task ID
+browser_take_screenshot({ name: "migrations_complete.png" })  // [X] No task ID
+browser_take_screenshot({ name: "frontend_loaded.png" })      // [X] No task ID
+browser_take_screenshot({ name: "session_5_final.png" })      // [X] No task ID
+browser_take_screenshot({ name: "verification.png" })         // [X] No task ID
 ```
 
-❌ **WRONG - Grouping tasks:**
+[X] **WRONG - Grouping tasks:**
 ```javascript
 // Complete tasks 1547, 1548, 1549, 1550, 1551
 browser_take_screenshot({ name: ".playwright-mcp/task_1547_to_1551.png" })
-// ❌ This verifies 5 tasks with 1 screenshot - NOT ALLOWED
+// [X] This verifies 5 tasks with 1 screenshot - NOT ALLOWED
 ```
 
-✅ **CORRECT - Individual verification with proper naming:**
+[OK] **CORRECT - Individual verification with proper naming:**
 ```javascript
 // Task 1547
 start_task({ task_id: 1547 })
@@ -1387,13 +1387,13 @@ update_task_status({ task_id: 1548, done: true })
 bash_docker({ command: "git status" })
 
 # 2. CRITICAL: Verify no dependency directories are staged
-bash_docker({ command: "git diff --cached --name-only | grep -E 'node_modules|venv|\\.venv|__pycache__|dist/|build/' && echo '⚠️  WARNING: Dependencies are staged!' || echo '✅ No dependencies staged'" })
+bash_docker({ command: "git diff --cached --name-only | grep -E 'node_modules|venv|\\.venv|__pycache__|dist/|build/' && echo '[!]  WARNING: Dependencies are staged!' || echo '[OK] No dependencies staged'" })
 
 # 3. Check file sizes being committed
 bash_docker({ command: "git diff --cached --stat" })
 
 # 4. Verify .gitignore exists and is comprehensive
-bash_docker({ command: "test -f .gitignore && echo '✅ .gitignore exists' || echo '❌ No .gitignore!'" })
+bash_docker({ command: "test -f .gitignore && echo '[OK] .gitignore exists' || echo '[X] No .gitignore!'" })
 ```
 
 **If you see warnings about staged dependencies:**
@@ -1476,7 +1476,7 @@ Current Epic: #N - Name
 
 **Archive old sessions to logs/** - Keep only last 3 sessions in main file.
 
-**❌ DO NOT CREATE:**
+**[X] DO NOT CREATE:**
 - SESSION_*_SUMMARY.md files (unnecessary - logs already exist)
 - TASK_*_VERIFICATION.md files (unnecessary - screenshots document verification)
 - Any other summary/documentation files (we have logging system for this)
@@ -1556,8 +1556,8 @@ mcp__task-manager__bash_docker({ command: "rm -f /tmp/api_test.js" })
 **No external Playwright MCP tools - everything runs inside Docker!**
 
 **Screenshot limitations:**
-- ⚠️ **NEVER use `fullPage: true`** - Can exceed 1MB buffer limit and crash session
-- ✅ Use viewport screenshots (default behavior)
+- [!] **NEVER use `fullPage: true`** - Can exceed 1MB buffer limit and crash session
+- [OK] Use viewport screenshots (default behavior)
 - If you need to see below fold, scroll and take multiple viewport screenshots
 
 
@@ -1665,28 +1665,28 @@ mcp__task-manager__bash_docker({ command: "rm -f /tmp/form_test.js" })
 
 ## STOPPING CONDITIONS DETAIL
 
-**✅ Epic Complete:**
+**[OK] Epic Complete:**
 - All tasks in current epic marked done
 - All tests passing
 - Good stopping point for review
 
-**✅ Context Limit:**
+**[OK] Context Limit:**
 - **45+ messages sent this session** - STOP NOW (approaching ~50 message compaction at 150K+ tokens)
 - **35-44 messages** - Finish current task only, then commit and stop (don't start new task)
 - Better to stop cleanly than hit compaction (loses Docker guidance, causes tool selection errors)
 - Commit current work, update progress, let next session continue with fresh context
 
-**✅ Work Type Change:**
+**[OK] Work Type Change:**
 - Switching from backend API to frontend UI
 - Different skill set/verification needed
 - Natural breaking point
 
-**✅ Blocker Found:**
+**[OK] Blocker Found:**
 - API key issue, environment problem, etc.
 - Stop, document blocker in progress notes
 - Let next session (or human) investigate
 
-**❌ Bad Reasons to Stop:**
+**[X] Bad Reasons to Stop:**
 - "Just completed one task" - Continue if more work available
 - "This is taking a while" - Quality over speed
 - "Tests are hard" - Required for task completion
@@ -1735,36 +1735,36 @@ mcp__task-manager__bash_docker({ command: "rm -f /tmp/form_test.js" })
 ## REMEMBER
 
 **Quality Enforcement:**
-- ✅ **Appropriate verification for EVERY task based on type**
-- ✅ **All tests MUST pass before marking task complete** (database enforced!)
-- ✅ Call `update_test_result` for EVERY test (no skipping!)
-- ✅ **UI tasks:** Browser screenshots required
-- ✅ **API tasks:** Response validation required
-- ✅ **Config tasks:** Build success required
-- ✅ **Database tasks:** Query verification required
-- ✅ **Integration tasks:** Full E2E workflow required
-- ✅ **Connection errors require 3 retry attempts before stopping**
+- [OK] **Appropriate verification for EVERY task based on type**
+- [OK] **All tests MUST pass before marking task complete** (database enforced!)
+- [OK] Call `update_test_result` for EVERY test (no skipping!)
+- [OK] **UI tasks:** Browser screenshots required
+- [OK] **API tasks:** Response validation required
+- [OK] **Config tasks:** Build success required
+- [OK] **Database tasks:** Query verification required
+- [OK] **Integration tasks:** Full E2E workflow required
+- [OK] **Connection errors require 3 retry attempts before stopping**
 
 **Efficiency:**
-- ✅ Work on 2-5 tasks per session (same epic)
-- ✅ Commit every 2-3 tasks (rollback points)
-- ✅ Stop at 45+ messages (before context compaction)
-- ✅ Maintain quality - don't rush
+- [OK] Work on 2-5 tasks per session (same epic)
+- [OK] Commit every 2-3 tasks (rollback points)
+- [OK] Stop at 45+ messages (before context compaction)
+- [OK] Maintain quality - don't rush
 
 **Documentation:**
-- ✅ Update `claude-progress.md` only
-- ❌ Don't create SESSION_*_SUMMARY.md files
-- ❌ Don't create TASK_*_VERIFICATION.md files
-- ❌ Logs already capture everything
+- [OK] Update `claude-progress.md` only
+- [X] Don't create SESSION_*_SUMMARY.md files
+- [X] Don't create TASK_*_VERIFICATION.md files
+- [X] Logs already capture everything
 
 **Path Correctness (Docker):**
-- ✅ Read/Write/Edit: Relative paths (`server/file.js`)
-- ❌ Never use `/workspace/` with Read/Write/Edit
-- ✅ bash_docker: Runs in container automatically
+- [OK] Read/Write/Edit: Relative paths (`server/file.js`)
+- [X] Never use `/workspace/` with Read/Write/Edit
+- [OK] bash_docker: Runs in container automatically
 
 **Database:**
-- ✅ Use MCP tools for all task tracking
-- ❌ Never delete or modify task descriptions
-- ✅ Only update status and test results
-- ⚠️ **`update_test_result` requires prior browser verification**
-- ⚠️ **`update_task_status` requires all tests verified and passing**
+- [OK] Use MCP tools for all task tracking
+- [X] Never delete or modify task descriptions
+- [OK] Only update status and test results
+- [!] **`update_test_result` requires prior browser verification**
+- [!] **`update_task_status` requires all tests verified and passing**

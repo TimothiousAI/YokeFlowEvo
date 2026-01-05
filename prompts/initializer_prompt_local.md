@@ -6,13 +6,13 @@ You are working **directly on the host machine** with no sandbox isolation.
 
 ### For Creating/Editing Files
 
-- ✅ `Write` - Create new files
-- ✅ `Edit` - Edit existing files
+- [OK] `Write` - Create new files
+- [OK] `Edit` - Edit existing files
 
 ### For Running Commands
 
-- ✅ `Bash` - Run npm, git, node, curl, etc.
-- ✅ Executes directly in project directory on host
+- [OK] `Bash` - Run npm, git, node, curl, etc.
+- [OK] Executes directly in project directory on host
 
 **Example:**
 ```bash
@@ -34,10 +34,10 @@ Bash({ command: "(cd server && npm run migrate)" })
 - v1: Initial version
 
 **Key improvements in v4:**
-- ✅ Batched epic creation (50-70% faster than one-by-one)
-- ✅ Batched test creation per epic (30-40% session time reduction)
-- ✅ Reduced context window usage (fewer intermediate status checks)
-- ✅ Clear workflow: draft → batch create → verify once
+- [OK] Batched epic creation (50-70% faster than one-by-one)
+- [OK] Batched test creation per epic (30-40% session time reduction)
+- [OK] Reduced context window usage (fewer intermediate status checks)
+- [OK] Clear workflow: draft → batch create → verify once
 
 ## YOUR ROLE - INITIALIZER AGENT (Session 0 - Initialization)
 
@@ -81,10 +81,10 @@ grep -r "authentication" spec/
 ```
 
 **Context Management (Important!):**
-- ❌ Don't read all spec files upfront (wastes tokens)
-- ✅ Follow references in the primary file
-- ✅ Read additional files only when needed for your current task
-- ✅ Use grep to search across files when looking for specific information
+- [X] Don't read all spec files upfront (wastes tokens)
+- [OK] Follow references in the primary file
+- [OK] Read additional files only when needed for your current task
+- [OK] Use grep to search across files when looking for specific information
 
 **This is critical** - all epics, tasks, and the project structure must be
 derived from the specification in YOUR CURRENT WORKING DIRECTORY.
@@ -559,13 +559,13 @@ logs/
 *.sqlite3
 *.db
 EOF
-    echo "✅ Created .gitignore with standard exclusions"
+    echo "[OK] Created .gitignore with standard exclusions"
 
     # Commit .gitignore immediately if git repo exists
     if [ -d .git ]; then
         git add .gitignore
         git commit -m "Add comprehensive .gitignore" || true
-        echo "✅ Committed .gitignore to git"
+        echo "[OK] Committed .gitignore to git"
     fi
 fi
 
@@ -574,7 +574,7 @@ if [ ! -f .env ]; then
     if [ -f .env.example ]; then
         echo "⚙️  Creating .env from .env.example..."
         cp .env.example .env
-        echo "⚠️  Please edit .env with your actual configuration values"
+        echo "[!]  Please edit .env with your actual configuration values"
         echo ""
         read -p "Press Enter after you've configured .env (or Ctrl+C to exit)..."
     fi

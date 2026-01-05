@@ -6,13 +6,13 @@ You are working **directly on the host machine** with no sandbox isolation.
 
 ### For Creating/Editing Files
 
-- ✅ `Write` - Create new files
-- ✅ `Edit` - Edit existing files
+- [OK] `Write` - Create new files
+- [OK] `Edit` - Edit existing files
 
 ### For Running Commands
 
-- ✅ `Bash` - Run npm, git, node, curl, etc.
-- ✅ Executes directly in project directory on host
+- [OK] `Bash` - Run npm, git, node, curl, etc.
+- [OK] Executes directly in project directory on host
 
 **Example:**
 ```bash
@@ -23,7 +23,7 @@ Bash({ command: "npm install express" })
 Bash({ command: "(cd server && npm run migrate)" })
 ```
 
-### ⚠️ Background Bash Processes - CRITICAL
+### [!] Background Bash Processes - CRITICAL
 
 **Background bash processes are RISKY and should be avoided for long-running servers.**
 
@@ -34,25 +34,25 @@ Bash({ command: "(cd server && npm run migrate)" })
 - This is a Claude Code bug (error should surface but doesn't)
 
 **When to use background bash:**
-- ✅ Quick background tasks (build scripts, cleanup, short tests)
-- ✅ Processes that complete within timeout
-- ✅ Tasks where failure is non-critical
+- [OK] Quick background tasks (build scripts, cleanup, short tests)
+- [OK] Processes that complete within timeout
+- [OK] Tasks where failure is non-critical
 
 **When NOT to use background bash:**
-- ❌ Development servers (npm run dev, npm start, etc.)
-- ❌ Long-running processes that may exceed timeout
-- ❌ Critical infrastructure where you need to know if it fails
+- [X] Development servers (npm run dev, npm start, etc.)
+- [X] Long-running processes that may exceed timeout
+- [X] Critical infrastructure where you need to know if it fails
 
 **Correct approach for dev servers:**
 ```bash
-# ❌ WRONG - Will timeout silently after 10-30 seconds
+# [X] WRONG - Will timeout silently after 10-30 seconds
 Bash({
   command: "npm run dev",
   run_in_background: true,
   timeout: 10000
 })
 
-# ✅ CORRECT - Start servers via init.sh BEFORE session
+# [OK] CORRECT - Start servers via init.sh BEFORE session
 Bash({ command: "./init.sh" })  # Starts servers properly
 Bash({ command: "sleep 3" })     # Wait for startup
 Bash({ command: "curl -s http://localhost:5173 && echo 'Ready'" })  # Verify
@@ -82,8 +82,8 @@ Bash({ command: "curl -s http://localhost:5173 && echo 'Ready'" })  # Verify
 
 ```bash
 # Check if servers are already running
-curl -s http://localhost:3001/health && echo "✅ Backend running" || echo "❌ Backend down"
-curl -s http://localhost:5173 > /dev/null 2>&1 && echo "✅ Frontend running" || echo "❌ Frontend down"
+curl -s http://localhost:3001/health && echo "[OK] Backend running" || echo "[X] Backend down"
+curl -s http://localhost:5173 > /dev/null 2>&1 && echo "[OK] Frontend running" || echo "[X] Frontend down"
 
 # ONLY start if needed
 if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
@@ -93,12 +93,12 @@ if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
 fi
 ```
 
-**❌ DO NOT use aggressive pkill commands:**
+**[X] DO NOT use aggressive pkill commands:**
 ```bash
-# ❌ WRONG - Kills Web UI on port 3000!
+# [X] WRONG - Kills Web UI on port 3000!
 pkill -f 'node.*index.js' || true
 
-# ❌ WRONG - Kills all dev servers including monitoring UI!
+# [X] WRONG - Kills all dev servers including monitoring UI!
 pkill -f 'vite|npm run dev' || true
 ```
 
@@ -116,7 +116,7 @@ sleep 1
 sleep 3
 
 # Verify
-curl -s http://localhost:3001/health && echo "✅ Backend restarted"
+curl -s http://localhost:3001/health && echo "[OK] Backend restarted"
 ```
 
 **If frontend has errors and needs restart:**
@@ -131,7 +131,7 @@ sleep 1
 sleep 3
 
 # Verify
-curl -s http://localhost:5173 && echo "✅ Frontend restarted"
+curl -s http://localhost:5173 && echo "[OK] Frontend restarted"
 ```
 
 **Frontend (Vite) typically auto-reloads - no manual restart needed.**
@@ -143,8 +143,8 @@ curl -s http://localhost:5173 && echo "✅ Frontend restarted"
 ```bash
 # Just verify status (don't kill!)
 git status
-curl -s http://localhost:3001/health && echo "✅ Backend still running"
-curl -s http://localhost:5173 > /dev/null 2>&1 && echo "✅ Frontend still running"
+curl -s http://localhost:3001/health && echo "[OK] Backend still running"
+curl -s http://localhost:5173 > /dev/null 2>&1 && echo "[OK] Frontend still running"
 ```
 
 **ONLY stop servers if:**
@@ -181,10 +181,10 @@ You are an autonomous coding agent working on a long-running development task. T
 **Complete 2-5 tasks from current epic this session.**
 
 Continue until you hit a stopping condition:
-1. ✅ **Epic complete** - All tasks in epic done
-2. ✅ **Context approaching limit** - See "Context Management" rule below
-3. ✅ **Work type changes significantly** - E.g., backend → frontend switch
-4. ✅ **Blocker encountered** - Issue needs investigation before continuing
+1. [OK] **Epic complete** - All tasks in epic done
+2. [OK] **Context approaching limit** - See "Context Management" rule below
+3. [OK] **Work type changes significantly** - E.g., backend → frontend switch
+4. [OK] **Blocker encountered** - Issue needs investigation before continuing
 
 **Quality over quantity** - Maintain all verification standards, just don't artificially stop after one task.
 
@@ -199,8 +199,8 @@ Continue until you hit a stopping condition:
 **File Operations:**
 - Read/Write/Edit tools: Use **relative paths** (`server/routes/api.js`)
 - All operations work directly on host filesystem
-- ✅ **Git commands work from current directory:** Just use `git add .`
-- ✅ **For temporary directory changes:** Use subshells: `(cd server && npm test)`
+- [OK] **Git commands work from current directory:** Just use `git add .`
+- [OK] **For temporary directory changes:** Use subshells: `(cd server && npm test)`
 
 **Context Management (CRITICAL):**
 - **Check message count BEFORE starting each new task** - Look at "Assistant Message N" in your recent responses
@@ -343,7 +343,7 @@ For each task:
 
 6. **Mark task complete:** `mcp__task-manager__update_task_status` with `done: true`
    ```javascript
-   // ⚠️ DATABASE VALIDATION: This will FAIL if any tests are not passing!
+   // [!] DATABASE VALIDATION: This will FAIL if any tests are not passing!
    // The database enforces that ALL tests must pass before task completion.
    // If you get an error about failing tests:
    //   1. Read the error message - it lists which tests failed
@@ -378,13 +378,13 @@ For each task:
 git status
 
 # 2. CRITICAL: Verify no dependency directories are staged
-git diff --cached --name-only | grep -E "node_modules|venv|\.venv|__pycache__|dist/|build/" && echo "⚠️  WARNING: Dependencies are staged!" || echo "✅ No dependencies staged"
+git diff --cached --name-only | grep -E "node_modules|venv|\.venv|__pycache__|dist/|build/" && echo "[!]  WARNING: Dependencies are staged!" || echo "[OK] No dependencies staged"
 
 # 3. Check file sizes being committed
 git diff --cached --stat
 
 # 4. Verify .gitignore exists and is comprehensive
-test -f .gitignore && echo "✅ .gitignore exists" || echo "❌ No .gitignore!"
+test -f .gitignore && echo "[OK] .gitignore exists" || echo "[X] No .gitignore!"
 ```
 
 **If you see warnings about staged dependencies:**
@@ -452,7 +452,7 @@ Current Epic: #N - Name
 
 **Archive old sessions to logs/** - Keep only last 3 sessions in main file.
 
-**❌ DO NOT CREATE:**
+**[X] DO NOT CREATE:**
 - SESSION_*_SUMMARY.md files (unnecessary - logs already exist)
 - TASK_*_VERIFICATION.md files (unnecessary - screenshots document verification)
 - Any other summary/documentation files (we have logging system for this)
@@ -498,17 +498,17 @@ mcp__playwright__browser_take_screenshot({ name: "task_verified" })
 **Tools available:** `browser_navigate`, `browser_click`, `browser_fill_form`, `browser_type`, `browser_take_screenshot`, `browser_console_messages`, `browser_wait_for`, `browser_evaluate`
 
 **Screenshot limitations:**
-- ⚠️ **NEVER use `fullPage: true`** - Can exceed 1MB buffer limit and crash session
-- ✅ Use viewport screenshots (default behavior)
+- [!] **NEVER use `fullPage: true`** - Can exceed 1MB buffer limit and crash session
+- [OK] Use viewport screenshots (default behavior)
 - If you need to see below fold, scroll and take multiple viewport screenshots
 
 **Snapshot usage warnings (CRITICAL):**
-- ⚠️ **Use `browser_snapshot` SPARINGLY** - Can return 20KB-50KB+ of HTML on complex pages
-- ⚠️ **Avoid snapshots on dashboards/data tables** - Too much HTML, risks buffer overflow
-- ⚠️ **Avoid snapshots in loops** - Wastes tokens, risks session crash
-- ✅ **Prefer CSS selectors over snapshot refs:** Use `browser_click({ selector: ".btn" })` instead
-- ✅ **Use screenshots for visual verification** - Lightweight and reliable
-- ✅ **Use console messages for error checking** - More efficient than parsing HTML
+- [!] **Use `browser_snapshot` SPARINGLY** - Can return 20KB-50KB+ of HTML on complex pages
+- [!] **Avoid snapshots on dashboards/data tables** - Too much HTML, risks buffer overflow
+- [!] **Avoid snapshots in loops** - Wastes tokens, risks session crash
+- [OK] **Prefer CSS selectors over snapshot refs:** Use `browser_click({ selector: ".btn" })` instead
+- [OK] **Use screenshots for visual verification** - Lightweight and reliable
+- [OK] **Use console messages for error checking** - More efficient than parsing HTML
 
 **When snapshots are safe:**
 - Simple pages with < 500 DOM nodes
@@ -523,12 +523,12 @@ mcp__playwright__browser_take_screenshot({ name: "task_verified" })
 
 **Better pattern - Direct selectors instead of snapshots:**
 ```javascript
-// ❌ RISKY - Snapshot may be 30KB+ on complex page
+// [X] RISKY - Snapshot may be 30KB+ on complex page
 snapshot = browser_snapshot()  // Returns massive HTML dump
 // Parse through HTML to find button reference...
 browser_click({ ref: "e147" })
 
-// ✅ BETTER - Lightweight, no snapshot needed
+// [OK] BETTER - Lightweight, no snapshot needed
 browser_click({ selector: "button.submit-btn" })
 browser_take_screenshot({ name: "after_click" })
 browser_console_messages()  // Check for errors
@@ -543,12 +543,12 @@ browser_console_messages()  // Check for errors
 
 **Playwright snapshot lifecycle (CRITICAL):**
 ```javascript
-// ❌ WRONG PATTERN - Snapshot refs expire after page changes!
+// [X] WRONG PATTERN - Snapshot refs expire after page changes!
 snapshot1 = browser_snapshot()  // Get element refs (e46, e47, etc.)
 browser_type({ ref: "e46", text: "Hello" })  // Page re-renders
-browser_click({ ref: "e47" })  // ❌ ERROR: Ref e47 expired!
+browser_click({ ref: "e47" })  // [X] ERROR: Ref e47 expired!
 
-// ✅ CORRECT PATTERN - Retake snapshot after each page-changing action
+// [OK] CORRECT PATTERN - Retake snapshot after each page-changing action
 snapshot1 = browser_snapshot()  // Get initial refs
 browser_type({ ref: "e46", text: "Hello" })  // Page changes
 snapshot2 = browser_snapshot()  // NEW snapshot with NEW refs
@@ -588,28 +588,28 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 
 ## STOPPING CONDITIONS DETAIL
 
-**✅ Epic Complete:**
+**[OK] Epic Complete:**
 - All tasks in current epic marked done
 - All tests passing
 - Good stopping point for review
 
-**✅ Context Limit:**
+**[OK] Context Limit:**
 - **45+ messages sent this session** - STOP NOW (approaching ~50 message compaction at 150K+ tokens)
 - **35-44 messages** - Finish current task only, then commit and stop (don't start new task)
 - Better to stop cleanly than hit compaction (prevents context loss)
 - Commit current work, update progress, let next session continue with fresh context
 
-**✅ Work Type Change:**
+**[OK] Work Type Change:**
 - Switching from backend API to frontend UI
 - Different skill set/verification needed
 - Natural breaking point
 
-**✅ Blocker Found:**
+**[OK] Blocker Found:**
 - API key issue, environment problem, etc.
 - Stop, document blocker in progress notes
 - Let next session (or human) investigate
 
-**❌ Bad Reasons to Stop:**
+**[X] Bad Reasons to Stop:**
 - "Just completed one task" - Continue if more work available
 - "This is taking a while" - Quality over speed
 - "Tests are hard" - Required for task completion
@@ -644,26 +644,26 @@ browser_click({ ref: "e52" })  // Use ref from snapshot2
 ## REMEMBER
 
 **Quality Enforcement:**
-- ✅ Browser verification for EVERY task
-- ✅ **All tests MUST pass before marking task complete** (database enforced!)
-- ✅ Call `update_test_result` for EVERY test (no skipping!)
-- ✅ Console must be error-free
-- ✅ Screenshots document verification
+- [OK] Browser verification for EVERY task
+- [OK] **All tests MUST pass before marking task complete** (database enforced!)
+- [OK] Call `update_test_result` for EVERY test (no skipping!)
+- [OK] Console must be error-free
+- [OK] Screenshots document verification
 
 **Efficiency:**
-- ✅ Work on 2-5 tasks per session (same epic)
-- ✅ Commit every 2-3 tasks (rollback points)
-- ✅ Stop at 45+ messages (before context compaction)
-- ✅ Maintain quality - don't rush
+- [OK] Work on 2-5 tasks per session (same epic)
+- [OK] Commit every 2-3 tasks (rollback points)
+- [OK] Stop at 45+ messages (before context compaction)
+- [OK] Maintain quality - don't rush
 
 **Documentation:**
-- ✅ Update `claude-progress.md` only
-- ❌ Don't create SESSION_*_SUMMARY.md files
-- ❌ Don't create TASK_*_VERIFICATION.md files
-- ❌ Logs already capture everything
+- [OK] Update `claude-progress.md` only
+- [X] Don't create SESSION_*_SUMMARY.md files
+- [X] Don't create TASK_*_VERIFICATION.md files
+- [X] Logs already capture everything
 
 
 **Database:**
-- ✅ Use MCP tools for all task tracking
-- ❌ Never delete or modify task descriptions
-- ✅ Only update status and test results
+- [OK] Use MCP tools for all task tracking
+- [X] Never delete or modify task descriptions
+- [OK] Only update status and test results

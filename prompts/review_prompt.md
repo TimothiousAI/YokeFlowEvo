@@ -118,9 +118,9 @@ Categorize errors and assess preventability:
 ### 4. Prompt Adherence
 
 Which steps from coding_prompt.md were:
-- ✅ Followed well (with evidence)
-- ⚠️ Partially followed
-- ❌ Skipped or ignored
+- [OK] Followed well (with evidence)
+- [!] Partially followed
+- [X] Skipped or ignored
 
 **Common Adherence Issues:**
 - Used `Bash` instead of `bash_docker` in Docker mode
@@ -210,11 +210,11 @@ For each issue, provide:
 
 ## 4. Prompt Adherence
 
-### Steps Followed Well ✅
+### Steps Followed Well [OK]
 - [Specific step with evidence]
 - [Another step]
 
-### Steps Skipped or Done Poorly ⚠️
+### Steps Skipped or Done Poorly [!]
 - [Specific step with evidence of violation]
 - [Impact of skipping this step]
 

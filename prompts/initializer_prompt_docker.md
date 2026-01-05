@@ -2,13 +2,13 @@
 
 **CRITICAL:** You are working in an isolated Docker container with **specific tool requirements**.
 
-## ⚠️ MOST IMPORTANT RULES (Read First!)
+## [!] MOST IMPORTANT RULES (Read First!)
 
 **1. NEVER create files using bash commands:**
-- ❌ `cat > file.js << 'EOF'` → **FAILS** in docker exec (heredoc escaping)
-- ❌ `echo "content" > file.js` → **FAILS** (quote/newline escaping)
-- ❌ Base64, python, or shell script workarounds → **ALL FAIL**
-- ✅ **ONLY use Write tool** for creating files
+- [X] `cat > file.js << 'EOF'` → **FAILS** in docker exec (heredoc escaping)
+- [X] `echo "content" > file.js` → **FAILS** (quote/newline escaping)
+- [X] Base64, python, or shell script workarounds → **ALL FAIL**
+- [OK] **ONLY use Write tool** for creating files
 
 **2. Volume mount sync is INSTANT:**
 - Write tool creates file on host → appears in container immediately
@@ -42,24 +42,24 @@ Container: /workspace/
 
 ---
 
-## ✅ TOOL SELECTION - MANDATORY
+## [OK] TOOL SELECTION - MANDATORY
 
 ### For Reading/Creating/Editing Files → Use Read, Write, and Edit Tools
 
-- ✅ `Read` - Read files (runs on HOST!)
-- ✅ `Write` - Create new files (runs on HOST!)
-- ✅ `Edit` - Edit existing files (runs on HOST!)
-- ✅ **No escaping issues** - backticks, quotes, all preserved perfectly
-- ✅ Files sync to container at `/workspace` immediately via volume mount
+- [OK] `Read` - Read files (runs on HOST!)
+- [OK] `Write` - Create new files (runs on HOST!)
+- [OK] `Edit` - Edit existing files (runs on HOST!)
+- [OK] **No escaping issues** - backticks, quotes, all preserved perfectly
+- [OK] Files sync to container at `/workspace` immediately via volume mount
 
 **CRITICAL - File Paths for Read/Write/Edit Tools:**
 
-⚠️ **These tools run on the HOST machine, NOT inside the Docker container.**
+[!] **These tools run on the HOST machine, NOT inside the Docker container.**
 
 **Path Requirements:**
-- ✅ Use **relative paths** from project root: `server/routes/claude.js`
-- ❌ DO NOT use `/workspace/` prefix: `/workspace/server/routes/claude.js`
-- ❌ DO NOT use absolute container paths
+- [OK] Use **relative paths** from project root: `server/routes/claude.js`
+- [X] DO NOT use `/workspace/` prefix: `/workspace/server/routes/claude.js`
+- [X] DO NOT use absolute container paths
 
 **Why this matters:**
 - The volume mount syncs files between host (`generations/project/`) and container (`/workspace/`)
@@ -73,16 +73,16 @@ Container: /workspace/
 
 **Examples - Correct Tool Usage:**
 
-✅ **Reading a file:**
+[OK] **Reading a file:**
 ```javascript
 // CORRECT - Relative path (runs on host)
 Read({ file_path: "server/routes/claude.js" })
 
 // WRONG - Container path (host doesn't have /workspace/)
-Read({ file_path: "/workspace/server/routes/claude.js" })  // ❌ Error: File does not exist
+Read({ file_path: "/workspace/server/routes/claude.js" })  // [X] Error: File does not exist
 ```
 
-✅ **Creating a file:**
+[OK] **Creating a file:**
 ```javascript
 // CORRECT - Relative path
 Write({
@@ -99,12 +99,12 @@ Write({
 
 // WRONG - Container path
 Write({
-  file_path: "/workspace/server/migrations/005_users.js",  // ❌ Error: File does not exist
+  file_path: "/workspace/server/migrations/005_users.js",  // [X] Error: File does not exist
   content: "..."
 })
 ```
 
-✅ **Editing a file:**
+[OK] **Editing a file:**
 ```javascript
 // CORRECT - Relative path
 Edit({
@@ -115,7 +115,7 @@ Edit({
 
 // WRONG - Container path
 Edit({
-  file_path: "/workspace/server/config.js",  // ❌ Error: File does not exist
+  file_path: "/workspace/server/config.js",  // [X] Error: File does not exist
   old_string: "...",
   new_string: "..."
 })
@@ -123,15 +123,15 @@ Edit({
 
 ### For Running Commands → Use bash_docker Tool ONLY
 
-- ✅ `mcp__task-manager__bash_docker` - **ONLY** tool for commands
-- ✅ Use for: npm, git, node, curl, ps, lsof, etc.
-- ✅ Executes inside container at `/workspace`
+- [OK] `mcp__task-manager__bash_docker` - **ONLY** tool for commands
+- [OK] Use for: npm, git, node, curl, ps, lsof, etc.
+- [OK] Executes inside container at `/workspace`
 
 **🚫 NEVER use bash_docker for file creation:**
-- ❌ DO NOT use: `cat > file.js << 'EOF'` (heredocs fail in docker exec)
-- ❌ DO NOT use: `echo "content" > file.js` (escaping nightmares)
-- ❌ DO NOT use: base64 encoding, python scripts, or other workarounds
-- ✅ ALWAYS use Write tool for creating files with multi-line content
+- [X] DO NOT use: `cat > file.js << 'EOF'` (heredocs fail in docker exec)
+- [X] DO NOT use: `echo "content" > file.js` (escaping nightmares)
+- [X] DO NOT use: base64 encoding, python scripts, or other workarounds
+- [OK] ALWAYS use Write tool for creating files with multi-line content
 
 **Example - Running Commands:**
 ```bash
@@ -151,7 +151,7 @@ mcp__task-manager__bash_docker({ command: "git add . && git commit -m 'message'"
 ### 🚫 Tool Restrictions
 
 **ONLY use bash_docker for commands. Do NOT use:**
-- ❌ `Bash` tool (runs on host, not in container)
+- [X] `Bash` tool (runs on host, not in container)
 
 ---
 
@@ -172,12 +172,12 @@ mcp__task-manager__bash_docker({ command: "git add . && git commit -m 'message'"
 
 ---
 
-## ❌ COMMON MISTAKES - DO NOT DO THIS
+## [X] COMMON MISTAKES - DO NOT DO THIS
 
 ### Mistake 1: Trying to create files with bash heredoc
 
 ```bash
-# ❌ WRONG - This FAILS in docker exec
+# [X] WRONG - This FAILS in docker exec
 bash_docker({
   command: "cat > server/index.js << 'EOF'\nimport express from 'express';\nEOF"
 })
@@ -186,7 +186,7 @@ bash_docker({
 ```
 
 ```javascript
-// ✅ CORRECT - Use Write tool instead
+// [OK] CORRECT - Use Write tool instead
 Write({
   file_path: "server/index.js",
   content: `import express from 'express';
@@ -202,31 +202,31 @@ const app = express();
 ### Mistake 2: Trying workarounds (they all fail!)
 
 ```bash
-# ❌ WRONG - Base64 encoding still fails
+# [X] WRONG - Base64 encoding still fails
 bash_docker({ command: "echo 'content' | base64 -d > file.js" })
 
-# ❌ WRONG - Python script has same escaping issues
+# [X] WRONG - Python script has same escaping issues
 bash_docker({ command: "python3 << 'END'\nwith open('f.js','w') as f: ...\nEND" })
 
-# ❌ WRONG - Multi-layer scripts just multiply the problems
+# [X] WRONG - Multi-layer scripts just multiply the problems
 bash_docker({ command: "cat > script.sh << 'EOF'\ncat > file.js...\nEOF" })
 ```
 
 ```javascript
-// ✅ CORRECT - Just use Write tool!
+// [OK] CORRECT - Just use Write tool!
 Write({ file_path: "server/index.js", content: "..." })
 ```
 
 ### Mistake 3: Checking for volume sync
 
 ```bash
-# ❌ UNNECESSARY - Volume sync is instant
+# [X] UNNECESSARY - Volume sync is instant
 Write({ file_path: "server/index.js", content: "..." })
 bash_docker({ command: "sleep 2 && ls -la server/" })  // Pointless wait!
 ```
 
 ```javascript
-// ✅ CORRECT - Trust the volume mount
+// [OK] CORRECT - Trust the volume mount
 Write({ file_path: "server/index.js", content: "..." })
 bash_docker({ command: "npm install" })  // File is already there!
 ```
@@ -272,7 +272,7 @@ mcp__task-manager__bash_docker({
 
 **CRITICAL:** When your project needs Docker services (PostgreSQL, Redis, MinIO, etc.), follow these rules to avoid conflicts with YokeFlow's own services.
 
-### ⚠️ Port Conflict Prevention
+### [!] Port Conflict Prevention
 
 YokeFlow uses these ports for its own services:
 - **5432** - YokeFlow's PostgreSQL database
@@ -337,7 +337,7 @@ Use this port allocation strategy:
 
 | Service | Default Port | YokeFlow Uses | Your Project Should Use |
 |---------|-------------|---------------|------------------------|
-| PostgreSQL | 5432 | ✅ 5432 | 5433, 5434, 5435... |
+| PostgreSQL | 5432 | [OK] 5432 | 5433, 5434, 5435... |
 | Redis | 6379 | - | 6380, 6381, 6382... |
 | MinIO API | 9000 | - | 9002, 9004, 9006... |
 | MinIO Console | 9001 | - | 9003, 9005, 9007... |
@@ -378,7 +378,7 @@ echo "🐳 Starting Docker services on HOST..."
 # Check for port conflicts first
 check_port() {
     if lsof -i :$1 > /dev/null 2>&1; then
-        echo "❌ ERROR: Port $1 is already in use!"
+        echo "[X] ERROR: Port $1 is already in use!"
         lsof -i :$1 | grep LISTEN
         exit 1
     fi
@@ -406,7 +406,7 @@ if [ -f docker-compose.yml ]; then
     fi
 fi
 
-echo "✅ Docker services started successfully!"
+echo "[OK] Docker services started successfully!"
 
 # Rest of init.sh continues...
 ```
@@ -450,12 +450,12 @@ if is_docker and DATABASE_URL:
 
 **NEVER attempt these approaches:**
 
-1. ❌ **Don't use default ports (5432, 6379, etc.)** - Conflicts with YokeFlow
-2. ❌ **Don't try to start Docker inside the container** - Docker-in-Docker issues
-3. ❌ **Don't use --network=host** - Breaks isolation and causes conflicts
-4. ❌ **Don't hardcode localhost in container** - Use host.docker.internal
+1. [X] **Don't use default ports (5432, 6379, etc.)** - Conflicts with YokeFlow
+2. [X] **Don't try to start Docker inside the container** - Docker-in-Docker issues
+3. [X] **Don't use --network=host** - Breaks isolation and causes conflicts
+4. [X] **Don't hardcode localhost in container** - Use host.docker.internal
 
-### ✅ Verification Steps
+### [OK] Verification Steps
 
 After creating Docker services configuration:
 
@@ -488,10 +488,10 @@ After creating Docker services configuration:
 - v1: Initial version
 
 **Key improvements in v4:**
-- ✅ Batched epic creation (50-70% faster than one-by-one)
-- ✅ Batched test creation per epic (30-40% session time reduction)
-- ✅ Reduced context window usage (fewer intermediate status checks)
-- ✅ Clear workflow: draft → batch create → verify once
+- [OK] Batched epic creation (50-70% faster than one-by-one)
+- [OK] Batched test creation per epic (30-40% session time reduction)
+- [OK] Reduced context window usage (fewer intermediate status checks)
+- [OK] Clear workflow: draft → batch create → verify once
 
 ## YOUR ROLE - INITIALIZER AGENT (Session 0 - Initialization)
 
@@ -535,10 +535,10 @@ grep -r "authentication" spec/
 ```
 
 **Context Management (Important!):**
-- ❌ Don't read all spec files upfront (wastes tokens)
-- ✅ Follow references in the primary file
-- ✅ Read additional files only when needed for your current task
-- ✅ Use grep to search across files when looking for specific information
+- [X] Don't read all spec files upfront (wastes tokens)
+- [OK] Follow references in the primary file
+- [OK] Read additional files only when needed for your current task
+- [OK] Use grep to search across files when looking for specific information
 
 **This is critical** - all epics, tasks, and the project structure must be
 derived from the specification in YOUR CURRENT WORKING DIRECTORY.
@@ -1058,13 +1058,13 @@ logs/
 *.sqlite3
 *.db
 EOF
-    echo "✅ Created .gitignore with standard exclusions"
+    echo "[OK] Created .gitignore with standard exclusions"
 
     # Commit .gitignore immediately if git repo exists
     if [ -d .git ]; then
         git add .gitignore
         git commit -m "Add comprehensive .gitignore" || true
-        echo "✅ Committed .gitignore to git"
+        echo "[OK] Committed .gitignore to git"
     fi
 fi
 
@@ -1073,7 +1073,7 @@ if [ ! -f .env ]; then
     if [ -f .env.example ]; then
         echo "⚙️  Creating .env from .env.example..."
         cp .env.example .env
-        echo "⚠️  Please edit .env with your actual configuration values"
+        echo "[!]  Please edit .env with your actual configuration values"
         echo ""
         read -p "Press Enter after you've configured .env (or Ctrl+C to exit)..."
     fi
