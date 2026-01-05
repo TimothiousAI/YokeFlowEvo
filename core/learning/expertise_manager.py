@@ -480,9 +480,156 @@ class ExpertiseManager:
         Returns:
             Validation report with changes made
         """
-        # Stub - will be implemented in Epic 94
-        logger.warning("ExpertiseManager.validate_expertise() not yet implemented")
-        return {}
+        try:
+            from datetime import datetime, timedelta
+            from pathlib import Path
+
+            # Get existing expertise
+            expertise = await self.get_expertise(domain)
+            if not expertise:
+                logger.info(f"No expertise found for domain '{domain}', nothing to validate")
+                return {'status': 'no_expertise', 'changes': []}
+
+            content = expertise.content
+            changes = []
+
+            # 1. Verify referenced core files still exist
+            if 'core_files' in content:
+                original_count = len(content['core_files'])
+                valid_files = []
+
+                for file_path in content['core_files']:
+                    # Check if file exists (relative to project root)
+                    file_exists = Path(file_path).exists()
+                    if file_exists:
+                        valid_files.append(file_path)
+                    else:
+                        changes.append(f"Removed non-existent file: {file_path}")
+
+                content['core_files'] = valid_files
+                removed_count = original_count - len(valid_files)
+                if removed_count > 0:
+                    logger.info(f"Removed {removed_count} non-existent files from '{domain}' expertise")
+
+            # 2. Prune stale failure learnings (older than 30 days)
+            if 'learnings' in content:
+                original_count = len(content['learnings'])
+                cutoff_date = datetime.now() - timedelta(days=30)
+                fresh_learnings = []
+
+                for learning in content['learnings']:
+                    # Only prune failures, keep successes
+                    if learning.get('type') == 'failure':
+                        learning_date_str = learning.get('date')
+                        if learning_date_str:
+                            try:
+                                learning_date = datetime.fromisoformat(learning_date_str.replace('Z', '+00:00'))
+                                if learning_date > cutoff_date:
+                                    fresh_learnings.append(learning)
+                                else:
+                                    changes.append(f"Pruned stale failure: {learning.get('lesson', '')[:50]}...")
+                            except (ValueError, AttributeError):
+                                # Keep if date parsing fails
+                                fresh_learnings.append(learning)
+                        else:
+                            # Keep if no date
+                            fresh_learnings.append(learning)
+                    else:
+                        # Keep non-failure learnings
+                        fresh_learnings.append(learning)
+
+                content['learnings'] = fresh_learnings
+                pruned_count = original_count - len(fresh_learnings)
+                if pruned_count > 0:
+                    logger.info(f"Pruned {pruned_count} stale learnings from '{domain}' expertise")
+
+            # 3. Remove duplicate entries in patterns
+            if 'patterns' in content:
+                original_count = len(content['patterns'])
+                seen_names = set()
+                unique_patterns = []
+
+                for pattern in content['patterns']:
+                    pattern_name = pattern.get('name', '')
+                    if pattern_name not in seen_names:
+                        seen_names.add(pattern_name)
+                        unique_patterns.append(pattern)
+                    else:
+                        changes.append(f"Removed duplicate pattern: {pattern_name}")
+
+                content['patterns'] = unique_patterns
+                dup_count = original_count - len(unique_patterns)
+                if dup_count > 0:
+                    logger.info(f"Removed {dup_count} duplicate patterns from '{domain}' expertise")
+
+            # 4. Remove duplicate entries in techniques
+            if 'techniques' in content:
+                original_count = len(content['techniques'])
+                seen_names = set()
+                unique_techniques = []
+
+                for technique in content['techniques']:
+                    technique_name = technique.get('name', '')
+                    if technique_name not in seen_names:
+                        seen_names.add(technique_name)
+                        unique_techniques.append(technique)
+                    else:
+                        changes.append(f"Removed duplicate technique: {technique_name}")
+
+                content['techniques'] = unique_techniques
+                dup_count = original_count - len(unique_techniques)
+                if dup_count > 0:
+                    logger.info(f"Removed {dup_count} duplicate techniques from '{domain}' expertise")
+
+            # Save updated expertise with validation timestamp
+            if changes:
+                # Calculate line count
+                line_count = len(json.dumps(content, indent=2).split('\n'))
+
+                # Save to database
+                saved = await self.db.save_expertise(
+                    self.project_id,
+                    domain,
+                    content,
+                    line_count
+                )
+
+                # Update validation timestamp
+                async with self.db.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE expertise_files
+                        SET validated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        saved['id']
+                    )
+
+                # Record validation in history
+                await self.db.record_expertise_update(
+                    expertise_id=saved['id'],
+                    session_id=None,
+                    change_type='validated',
+                    summary=f"Validated expertise: {len(changes)} changes",
+                    diff='\n'.join(changes)
+                )
+
+                logger.info(f"Validated '{domain}' expertise with {len(changes)} changes")
+
+            return {
+                'status': 'validated',
+                'domain': domain,
+                'changes': changes,
+                'changes_count': len(changes)
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to validate expertise for domain '{domain}': {e}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'changes': []
+            }
 
     async def self_improve(self, domain: str) -> None:
         """
