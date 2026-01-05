@@ -273,7 +273,7 @@ class NotificationService:
     ) -> str:
         """Format a human-readable blocker message."""
 
-        message = f"""🚨 **YokeFlow Session Blocked**
+        message = f"""[!] **YokeFlow Session Blocked**
 
 **Project:** {project_name}
 **Session:** {session_id}

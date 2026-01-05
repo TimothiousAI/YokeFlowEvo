@@ -622,7 +622,7 @@ You are executing in an **isolated git worktree** for parallel development:
 
         # Add domain expertise if available
         if expertise:
-            prompt += "\n## 🧠 Domain Expertise\n\n"
+            prompt += "\n## Domain Expertise\n\n"
 
             # Handle expertise as dict with patterns/techniques or as string
             if isinstance(expertise, dict):

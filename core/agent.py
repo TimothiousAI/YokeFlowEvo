@@ -216,7 +216,7 @@ async def run_agent_session(
                             )
                             if is_blocked:
                                 # Document blocker and halt session
-                                error_msg = f"🚨 INTERVENTION: {reason}"
+                                error_msg = f"[!] INTERVENTION: {reason}"
                                 print(f"\n{error_msg}\n")
                                 logger.log_error(error_msg)
 
@@ -356,7 +356,7 @@ async def run_agent_session(
                             is_blocked, reason = await intervention_manager.check_tool_error(error_msg)
                             if is_blocked:
                                 # Document blocker and halt session
-                                error_msg = f"🚨 INTERVENTION: {reason}"
+                                error_msg = f"[!] INTERVENTION: {reason}"
                                 print(f"\n{error_msg}\n")
                                 logger.log_error(error_msg)
 

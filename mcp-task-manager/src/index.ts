@@ -641,7 +641,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: 'text',
-              text: 'Project marked as complete! 🎉'
+              text: 'Project marked as complete!'
             }
           ]
         };
