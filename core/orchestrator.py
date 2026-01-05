@@ -30,6 +30,7 @@ from core.client import create_client
 from core.database_connection import get_db, DatabaseManager, is_postgresql_configured
 from core.orchestrator_models import SessionStatus, SessionType, SessionInfo
 from core.quality_integration import QualityIntegration
+from core.validation import run_validation
 
 if TYPE_CHECKING:
     from core.database import TaskDatabase
@@ -674,6 +675,17 @@ class AgentOrchestrator:
                 session_info.ended_at = datetime.now()
                 session_info.metrics = metrics
 
+                # Repository Validation: Check for committed dependencies and .gitignore issues
+                try:
+                    validation_report = run_validation(project_path, auto_fix=True)
+                    if validation_report["total_issues"] > 0:
+                        logger.warning(
+                            f"Repository validation found {validation_report['total_issues']} issues. "
+                            f"See session logs for details."
+                        )
+                except Exception as e:
+                    logger.error(f"Repository validation failed: {e}")
+
             except Exception as e:
                 logger.error(f"Test completion session failed: {e}")
                 session_info.status = SessionStatus.ERROR
@@ -986,6 +998,20 @@ class AgentOrchestrator:
 
                 session_info.ended_at = datetime.now()
                 session_info.metrics = metrics
+
+                # Repository Validation: Check for committed dependencies and .gitignore issues
+                try:
+                    validation_report = run_validation(project_path, auto_fix=True)
+                    if validation_report["total_issues"] > 0:
+                        logger.warning(
+                            f"Repository validation found {validation_report['total_issues']} issues. "
+                            f"See session logs for details."
+                        )
+                        # Log issues for debugging
+                        for issue in validation_report["issues"]:
+                            logger.debug(f"[{issue['severity']}] {issue['category']}: {issue['message']}")
+                except Exception as e:
+                    logger.error(f"Repository validation failed: {e}")
 
                 # Phase 1 Review System: Quick quality check (only for coding sessions)
                 if not is_initializer:
