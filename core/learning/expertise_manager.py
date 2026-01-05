@@ -159,6 +159,50 @@ class ExpertiseManager:
             logger.error(f"Failed to get all expertise: {e}")
             return {}
 
+    async def get_expertise_history(self, domain: str) -> List[Dict[str, Any]]:
+        """
+        Get update history for expertise in a specific domain.
+
+        Provides audit trail of all changes made to expertise over time,
+        including who made changes, when, and what was modified.
+
+        Args:
+            domain: Domain name
+
+        Returns:
+            List of update records with details:
+            - id: Update record ID
+            - expertise_id: ID of expertise file
+            - session_id: Session that made the change (if applicable)
+            - change_type: Type of change (learned, validated, pruned, self_improved)
+            - summary: Brief description of changes
+            - diff: Detailed diff of changes
+            - created_at: Timestamp of update
+        """
+        try:
+            # Get expertise for this domain
+            expertise = await self.get_expertise(domain)
+            if not expertise:
+                logger.debug(f"No expertise found for domain '{domain}', no history available")
+                return []
+
+            # Get the expertise ID from database
+            record = await self.db.get_expertise(self.project_id, domain)
+            if not record:
+                return []
+
+            expertise_id = record['id']
+
+            # Get history from database
+            history = await self.db.get_expertise_history(expertise_id)
+
+            logger.debug(f"Retrieved {len(history)} history records for '{domain}' domain")
+            return history
+
+        except Exception as e:
+            logger.error(f"Failed to get expertise history for domain '{domain}': {e}")
+            return []
+
     def classify_domain(self, task_description: str, file_paths: List[str]) -> str:
         """
         Classify task into appropriate domain.
