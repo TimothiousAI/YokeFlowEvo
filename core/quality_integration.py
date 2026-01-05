@@ -87,8 +87,8 @@ class QualityIntegration:
             issues = quick_quality_check(metrics, is_initializer=is_initializer)
 
             # Separate critical issues from warnings
-            critical_issues = [i for i in issues if i.startswith("❌")]
-            warnings = [i for i in issues if i.startswith("⚠️")]
+            critical_issues = [i for i in issues if i.startswith("[X]")]
+            warnings = [i for i in issues if i.startswith("[!]")]
 
             # Calculate overall quality rating
             rating = get_quality_rating(metrics)
@@ -223,7 +223,7 @@ class QualityIntegration:
             )
 
             logger.info(
-                f"✅ Deep review complete for session {session_id}: "
+                f"[OK] Deep review complete for session {session_id}: "
                 f"Rating {result['overall_rating']}/10"
             )
 

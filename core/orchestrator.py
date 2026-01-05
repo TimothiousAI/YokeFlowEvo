@@ -517,7 +517,7 @@ class AgentOrchestrator:
                     total_epics = progress.get('total_epics', 0)
                     logger.info(f"Auto-continue check: {completed_epics}/{total_epics} epics complete")
                     if completed_epics == total_epics and total_epics > 0:
-                        logger.info(f"✅ All epics complete ({completed_epics}/{total_epics}). Stopping auto-continue.")
+                        logger.info(f"[OK] All epics complete ({completed_epics}/{total_epics}). Stopping auto-continue.")
                         # Notify via callback
                         if self.event_callback:
                             await self.event_callback(project_id, "all_epics_complete", {
@@ -569,7 +569,7 @@ class AgentOrchestrator:
 
                     # Mark project as complete in database
                     await db.mark_project_complete(project_id)
-                    logger.info("✅ Project marked as complete in database")
+                    logger.info("[OK] Project marked as complete in database")
 
                     # Stop Docker container to free up ports
                     # This is best-effort - don't fail if container doesn't exist or can't be stopped
@@ -581,7 +581,7 @@ class AgentOrchestrator:
                             logger.info(f"Stopping Docker container for completed project: {project_name}")
                             stopped = SandboxManager.stop_docker_container(project_name)
                             if stopped:
-                                logger.info(f"✅ Docker container stopped successfully")
+                                logger.info(f"[OK] Docker container stopped successfully")
                             else:
                                 logger.info(f"Docker container was not running or doesn't exist")
                     except Exception as e:

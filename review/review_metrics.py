@@ -200,7 +200,7 @@ def quick_quality_check(session_metrics: Dict[str, Any], is_initializer: bool = 
         is_initializer: True if this is an initialization session (skips browser verification check)
 
     Returns:
-        List of issue strings (e.g., ["❌ CRITICAL: No browser verification"])
+        List of issue strings (e.g., ["[X] CRITICAL: No browser verification"])
         Empty list if no issues found
 
     Example:
@@ -219,19 +219,19 @@ def quick_quality_check(session_metrics: Dict[str, Any], is_initializer: bool = 
         playwright_screenshot_count = session_metrics.get('playwright_screenshot_count', 0)
 
         if playwright_count == 0:
-            issues.append("❌ CRITICAL: No browser verification detected (0 Playwright calls)")
+            issues.append("[X] CRITICAL: No browser verification detected (0 Playwright calls)")
         elif playwright_screenshot_count == 0:
-            issues.append("⚠️ WARNING: Playwright used but no screenshots taken")
+            issues.append("[!] WARNING: Playwright used but no screenshots taken")
 
     # Error rate acceptable?
     error_rate = session_metrics.get('error_rate', 0)
     if error_rate > 0.15:
-        issues.append(f"⚠️ High error rate: {error_rate:.1%} (target: <15%)")
+        issues.append(f"[!] High error rate: {error_rate:.1%} (target: <15%)")
 
     # Reasonable tool usage?
     total_tools = session_metrics.get('total_tool_uses', 0)
     if total_tools < 5:
-        issues.append(f"⚠️ Very few tool uses: {total_tools} (possible incomplete session?)")
+        issues.append(f"[!] Very few tool uses: {total_tools} (possible incomplete session?)")
 
     return issues
 
@@ -277,7 +277,7 @@ def get_quality_rating(session_metrics: Dict[str, Any]) -> int:
         score -= 1  # Moderate error rate
 
     # Critical issues
-    critical_issues = [i for i in issues if i.startswith("❌")]
+    critical_issues = [i for i in issues if i.startswith("[X]")]
     score -= len(critical_issues)
 
     # Ensure score stays in valid range
@@ -296,9 +296,9 @@ def format_quality_summary(session_metrics: Dict[str, Any]) -> str:
 
     Example output:
         Quality Rating: 8/10
-        ✅ Browser verification: 42 Playwright calls (12 screenshots)
-        ✅ Error rate: 5.2% (3 errors in 58 tool uses)
-        ⚠️ WARNING: High error rate: 18.0%
+        [OK] Browser verification: 42 Playwright calls (12 screenshots)
+        [OK] Error rate: 5.2% (3 errors in 58 tool uses)
+        [!] WARNING: High error rate: 18.0%
     """
     rating = get_quality_rating(session_metrics)
     issues = quick_quality_check(session_metrics)
@@ -310,9 +310,9 @@ def format_quality_summary(session_metrics: Dict[str, Any]) -> str:
     screenshot_count = session_metrics.get('playwright_screenshot_count', 0)
 
     if playwright_count > 0:
-        lines.append(f"✅ Browser verification: {playwright_count} Playwright calls ({screenshot_count} screenshots)")
+        lines.append(f"[OK] Browser verification: {playwright_count} Playwright calls ({screenshot_count} screenshots)")
     else:
-        lines.append("❌ No browser verification")
+        lines.append("[X] No browser verification")
 
     # Error rate
     error_count = session_metrics.get('error_count', 0)
@@ -320,9 +320,9 @@ def format_quality_summary(session_metrics: Dict[str, Any]) -> str:
     error_rate = session_metrics.get('error_rate', 0)
 
     if error_rate < 0.05:
-        lines.append(f"✅ Error rate: {error_rate:.1%} ({error_count} errors in {total_tools} tool uses)")
+        lines.append(f"[OK] Error rate: {error_rate:.1%} ({error_count} errors in {total_tools} tool uses)")
     else:
-        lines.append(f"⚠️ Error rate: {error_rate:.1%} ({error_count} errors in {total_tools} tool uses)")
+        lines.append(f"[!] Error rate: {error_rate:.1%} ({error_count} errors in {total_tools} tool uses)")
 
     # Issues
     if issues:

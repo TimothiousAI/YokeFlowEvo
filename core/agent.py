@@ -185,7 +185,7 @@ async def run_agent_session(
                         if "Credit balance is too low" in block.text:
                             error_msg = "Credit balance is too low - API key is being used instead of OAuth token"
                             logger.log_error(error_msg)
-                            print(f"\n❌ FATAL ERROR: {error_msg}", flush=True)
+                            print(f"\n[FATAL ERROR] {error_msg}", flush=True)
                             print("   This usually means ANTHROPIC_API_KEY leaked from the generated project.", flush=True)
                             print("   Check generations/{project}/.env and remove ANTHROPIC_API_KEY if present.", flush=True)
                             raise RuntimeError(error_msg)
@@ -288,7 +288,7 @@ async def run_agent_session(
 
                             if is_risky and timeout_sec < 60:
                                 warning_msg = (
-                                    f"⚠️  WARNING: Background bash with short timeout ({timeout_sec}s) for server command.\n"
+                                    f"[WARNING] Background bash with short timeout ({timeout_sec}s) for server command.\n"
                                     f"   Command: {command}\n"
                                     f"   Risk: Process may timeout and abort silently (known Claude Code bug).\n"
                                     f"   Recommendation: Start servers via init.sh before session, not during.\n"
@@ -409,7 +409,7 @@ async def run_agent_session(
                                 "type": "api_key_warning",
                                 "source": api_key_source,
                                 "message": (
-                                    "⚠️ Using ANTHROPIC_API_KEY (credit-based billing). "
+                                    "[!] Using ANTHROPIC_API_KEY (credit-based billing). "
                                     "This is more expensive than CLAUDE_CODE_OAUTH_TOKEN (membership plan). "
                                     "Check if ANTHROPIC_API_KEY leaked from project .env file."
                                 ),
@@ -420,7 +420,7 @@ async def run_agent_session(
 
                         # Also print warning to console
                         print("\n" + "=" * 80)
-                        print("⚠️  WARNING: Using ANTHROPIC_API_KEY (Credit-Based Billing)")
+                        print("[!] WARNING: Using ANTHROPIC_API_KEY (Credit-Based Billing)")
                         print("=" * 80)
                         print("You are using an API key instead of OAuth token (membership plan).")
                         print("This is significantly more expensive (~$3/million tokens vs included in plan).")

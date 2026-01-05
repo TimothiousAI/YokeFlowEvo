@@ -302,7 +302,7 @@ def analyze_session_logs(jsonl_path: Path) -> Dict[str, Any]:
             'screenshots_before_pct': screenshots_before_pct,
             'screenshots_after_pct': 1 - screenshots_before_pct,
             'console_check_count': console_check_count,
-            'has_good_nav_pattern': 'YES ✅' if has_good_pattern else 'NO ⚠️',
+            'has_good_nav_pattern': 'YES [OK]' if has_good_pattern else 'NO [!]',
             'adherence_checks': adherence_issues,
             'commit_count': commit_count,
             'last_commit_message': last_commit_message,
@@ -767,7 +767,7 @@ def _create_review_context(
             context += f"\n- **Task {task_id}**: {duration}"
             context += f"\n  - Browser verifications: {browser_count}"
             context += f"\n  - Tests marked: {test_count}"
-            context += f"\n  - Verified before completion: {'YES ✅' if verified_before else 'NO ❌'}"
+            context += f"\n  - Verified before completion: {'YES [OK]' if verified_before else 'NO [X]'}"
     else:
         context += "\n- No tasks completed this session"
 
@@ -775,11 +775,11 @@ def _create_review_context(
     context += f"\n\n## Prompt Adherence Indicators\n"
     adherence_issues = enhanced_data.get('adherence_checks', [])
     if adherence_issues:
-        context += "⚠️ **Violations detected:**\n"
+        context += "[!] **Violations detected:**\n"
         for issue in adherence_issues[:10]:  # Limit to first 10
             context += f"\n- [{issue.get('timestamp', 'unknown')}] {issue.get('issue', '')}"
     else:
-        context += "✅ No prompt violations detected"
+        context += "[OK] No prompt violations detected"
 
     # Session Event Timeline (replaces TXT log excerpt)
     context += f"\n\n## Session Event Timeline\n"
@@ -787,12 +787,12 @@ def _create_review_context(
     if key_events:
         for event in key_events:
             emoji = {
-                'session_start': '🚀',
-                'task_start': '▶️',
-                'task_complete': '✅',
-                'error': '❌',
-                'git_commit': '💾'
-            }.get(event.get('type'), '•')
+                'session_start': '>',
+                'task_start': '>',
+                'task_complete': '[OK]',
+                'error': '[X]',
+                'git_commit': '[+]'
+            }.get(event.get('type'), '*')
 
             time_str = event.get('time', '')
             time_only = time_str.split('T')[1][:8] if 'T' in time_str else time_str
