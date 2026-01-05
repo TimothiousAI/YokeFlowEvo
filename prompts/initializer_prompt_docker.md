@@ -648,8 +648,38 @@ review the entire roadmap before coding begins.
 - Detailed implementation instructions in `action` field
 - Ordered by dependency (foundational first)
 - Include file paths, dependencies, and specific requirements
+- **Declare task dependencies** using `depends_on` field for proper parallel execution
 
-**Example of expanding an epic:**
+**Task Dependencies:**
+
+Use the `depends_on` field to specify which tasks must complete before this task can start.
+This enables the parallel execution engine to compute optimal batching.
+
+**Dependency format:**
+```
+{
+  "description": "Task name",
+  "action": "Implementation details...",
+  "priority": 2,
+  "depends_on": [task_id1, task_id2],  // Optional: tasks this depends on
+  "dependency_type": "hard"  // Optional: "hard" (default) or "soft"
+}
+```
+
+**Common dependency patterns:**
+- **Database schema → API routes** - API needs schema created first
+- **API endpoints → Frontend UI** - UI needs API endpoints available
+- **Authentication → Protected routes** - Auth must exist before protecting routes
+- **Config/env → Feature code** - Configuration before implementation
+- **Tests → Deployment** - All tests pass before deploying
+
+**Dependency types:**
+- `hard` (default): Task MUST wait for dependencies to complete (blocks execution)
+- `soft`: Hint that task should run after dependencies, but doesn't block (can run in parallel if needed)
+
+**Note:** You won't have task IDs until after calling `expand_epic`. For first pass, order tasks by dependency and note which tasks depend on others. After getting task IDs back, you can update tasks with `depends_on` if needed (though usually ordering by priority is sufficient).
+
+**Example of expanding an epic (without dependencies - simple ordering):**
 
 ```
 mcp__task-manager__expand_epic
@@ -664,8 +694,58 @@ tasks: [
     "description": "Set up database connection",
     "action": "Create database connection module:\n- Connection pooling\n- Error handling\n- Query helper functions\n- Migration support\n\nFile: server/db.js\nDependencies: database driver for your stack",
     "priority": 2
+  },
+  {
+    "description": "Create API endpoints",
+    "action": "Implement REST API routes:\n- User CRUD endpoints\n- Authentication routes\n- Error responses\n\nFile: server/routes/api.js\nNote: Requires database connection (task 2)",
+    "priority": 3
   }
 ]
+```
+
+**Example with explicit dependencies (for parallel execution):**
+
+When tasks have clear dependencies that should be enforced for parallel execution,
+use the `depends_on` field. This is especially important when:
+- Tasks from different epics depend on each other
+- You want to maximize parallelism within an epic
+- The natural ordering might not be obvious
+
+```
+# First, expand epic without depends_on to get task IDs
+mcp__task-manager__expand_epic
+epic_id: 2
+tasks: [
+  {
+    "description": "Create database schema",
+    "action": "Define SQL schema:\n- Users table\n- Posts table\n- Relationships",
+    "priority": 1
+  },
+  {
+    "description": "Implement user authentication API",
+    "action": "Create auth endpoints:\n- POST /api/auth/login\n- POST /api/auth/register\n- GET /api/auth/me\n\nRequires: Database schema",
+    "priority": 2
+  },
+  {
+    "description": "Build login UI component",
+    "action": "Create React login form:\n- Email/password fields\n- Validation\n- API integration\n\nRequires: Auth API",
+    "priority": 3
+  }
+]
+
+# Response will include task IDs: [45, 46, 47]
+
+# If needed, update tasks to add explicit dependencies
+# (Usually not needed - priority ordering is sufficient)
+# But if you need parallel execution across epics:
+
+mcp__task-manager__create_task
+epic_id: 3
+description: "Integrate authentication in frontend"
+action: "Add auth context and protected routes..."
+priority: 1
+depends_on: [46, 47]  # Depends on tasks from Epic 2
+dependency_type: "hard"
 ```
 
 **After expanding each epic, add tests for the tasks:**
