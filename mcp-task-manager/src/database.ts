@@ -59,6 +59,165 @@ export class TaskDatabase {
     }
   }
 
+  // Transaction utilities for safe parallel execution
+
+  /**
+   * Execute a function within a database transaction.
+   * Automatically handles BEGIN, COMMIT, and ROLLBACK.
+   *
+   * @param fn - Async function that receives a database client
+   * @returns Result from the function
+   */
+  private async withTransaction<T>(fn: (client: any) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Update task status with row-level locking to prevent concurrent modification.
+   * Uses SELECT FOR UPDATE to lock the task row and prevent race conditions.
+   * Implements retry logic for lock contention.
+   *
+   * CRITICAL: Use this method instead of updateTaskStatus() in parallel execution contexts.
+   *
+   * @param taskId - Task ID to update
+   * @param done - Whether task is complete
+   * @param maxRetries - Maximum retry attempts (default: 3)
+   * @returns Updated task or null
+   */
+  async updateTaskStatusSafe(
+    taskId: string | number,
+    done: boolean,
+    maxRetries: number = 3
+  ): Promise<Task | null> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await this.withTransaction(async (client) => {
+          // CRITICAL: Lock the task row to prevent concurrent updates
+          const lockResult = await client.query(`
+            SELECT id, epic_id, done
+            FROM tasks
+            WHERE id = $1 AND project_id = $2
+            FOR UPDATE NOWAIT
+          `, [String(taskId), this.projectId]);
+
+          if (lockResult.rows.length === 0) {
+            throw new Error(`Task ${taskId} not found`);
+          }
+
+          const task = lockResult.rows[0];
+
+          // If marking task as complete, validate all tests are passing
+          if (done === true) {
+            const tests = await this.listTests(taskId);
+
+            if (tests.length > 0) {
+              const failingTests = tests.filter(t => t.passes !== true);
+
+              if (failingTests.length > 0) {
+                throw new Error(
+                  `Cannot mark task ${taskId} as complete: ${failingTests.length} of ${tests.length} test(s) not passing.\n` +
+                  `Failing tests:\n${failingTests.map(t => `  - Test ${t.id}: ${t.description}`).join('\n')}\n\n` +
+                  `All tests must pass before marking task complete.`
+                );
+              }
+            }
+          }
+
+          // Update task status
+          const completedAt = done ? 'NOW()' : 'NULL';
+          await client.query(`
+            UPDATE tasks
+            SET done = $1, completed_at = ${completedAt}
+            WHERE id = $2 AND project_id = $3
+          `, [done, String(taskId), this.projectId]);
+
+          // CRITICAL: Check epic completion atomically within same transaction
+          if (done) {
+            await this.checkEpicCompletionSafe(client, task.epic_id);
+          }
+
+          // Return updated task
+          const result = await client.query(`
+            SELECT
+              id::text,
+              epic_id::text,
+              description,
+              action,
+              'pending' as status,
+              priority,
+              created_at,
+              completed_at,
+              session_notes,
+              CASE WHEN done = true THEN 1 ELSE 0 END as done
+            FROM tasks
+            WHERE id = $1 AND project_id = $2
+          `, [String(taskId), this.projectId]);
+
+          return result.rows[0] || null;
+        });
+      } catch (error: any) {
+        lastError = error;
+
+        // If lock conflict, retry after brief delay
+        if (error.code === '55P03') { // lock_not_available
+          if (attempt < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+            continue;
+          }
+        }
+
+        // Re-throw non-retry errors immediately
+        throw error;
+      }
+    }
+
+    throw new Error(`Failed to update task ${taskId} after ${maxRetries} attempts: ${lastError?.message}`);
+  }
+
+  /**
+   * Check if all tasks in epic are complete and update epic status atomically.
+   * Uses SELECT FOR UPDATE to lock epic row and prevent race conditions.
+   * Must be called within a transaction.
+   *
+   * @param client - Database client within transaction
+   * @param epicId - Epic ID to check
+   */
+  private async checkEpicCompletionSafe(client: any, epicId: string | number): Promise<void> {
+    // CRITICAL: Lock the epic row to prevent concurrent completion checks
+    await client.query(`
+      SELECT id FROM epics WHERE id = $1 FOR UPDATE
+    `, [String(epicId)]);
+
+    // Count pending tasks
+    const result = await client.query(`
+      SELECT COUNT(*)::int as pending
+      FROM tasks
+      WHERE epic_id = $1 AND done = false
+    `, [String(epicId)]);
+
+    // If no pending tasks, mark epic as complete
+    if (result.rows[0]?.pending === 0) {
+      await client.query(`
+        UPDATE epics
+        SET status = 'completed', completed_at = NOW()
+        WHERE id = $1
+      `, [String(epicId)]);
+    }
+  }
+
   // Query methods
 
   async getProjectStatus(): Promise<ProjectStatus> {

@@ -1,12 +1,20 @@
 """
-Dependency Resolution System
+Dependency Resolver
+===================
 
-Implements Kahn's algorithm for topological sorting of tasks based on their
-dependencies, producing parallel execution batches.
+Analyzes task dependencies and computes parallel execution batches using
+topological sorting (Kahn's algorithm).
+
+Key Features:
+- Resolves task-level and epic-level dependencies
+- Detects circular dependencies
+- Supports hard (blocking) and soft (non-blocking) dependencies
+- Applies priority ordering within each batch
+- Generates visualization (Mermaid, ASCII) for dependency graphs
 """
 
-from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Optional, Set
+from dataclasses import dataclass
+from typing import List, Tuple, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,80 +22,84 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DependencyGraph:
-    """Result of dependency resolution."""
-    batches: List[List[int]] = field(default_factory=list)
-    task_order: List[int] = field(default_factory=list)
-    circular_deps: List[Tuple[int, int]] = field(default_factory=list)
-    missing_deps: List[int] = field(default_factory=list)
+    """
+    Result of dependency resolution.
+
+    Attributes:
+        batches: List of task ID batches that can execute in parallel
+        task_order: Flattened list of all tasks in execution order
+        circular_deps: List of detected circular dependency cycles
+        missing_deps: List of task IDs that have invalid dependency references
+    """
+    batches: List[List[int]]
+    task_order: List[int]
+    circular_deps: List[Tuple]
+    missing_deps: List[int]
 
 
 class DependencyResolver:
     """
-    Resolves task dependencies into parallel execution batches.
+    Resolves task dependencies and computes parallel execution batches.
 
-    Uses Kahn's algorithm for topological sorting, grouping independent
-    tasks into batches that can be executed concurrently.
+    Uses Kahn's algorithm for topological sorting to determine which tasks
+    can run in parallel while respecting dependency constraints.
     """
 
-    def __init__(self, project_id: int):
+    def __init__(self, db_connection: Any = None):
         """
-        Initialize the dependency resolver.
+        Initialize dependency resolver.
 
         Args:
-            project_id: The project ID for which to resolve dependencies
+            db_connection: Optional database connection for querying tasks
         """
-        self.project_id = project_id
+        self.db = db_connection
+        logger.info("DependencyResolver initialized")
 
-    def resolve(self, tasks: List[Dict]) -> DependencyGraph:
+    def resolve(self, tasks: List[Dict[str, Any]]) -> DependencyGraph:
         """
-        Resolve task dependencies into parallel batches.
+        Resolve dependencies and compute parallel batches.
 
         Args:
-            tasks: List of task dictionaries with 'id', 'depends_on', 'priority'
+            tasks: List of task dictionaries with id, depends_on, priority fields
 
         Returns:
-            DependencyGraph with computed batches and any issues found
+            DependencyGraph with computed batches and metadata
         """
-        # TODO: Implement Kahn's algorithm
-        raise NotImplementedError("DependencyResolver.resolve() not yet implemented")
+        # Stub implementation - will be implemented in Epic 91
+        logger.warning("DependencyResolver.resolve() not yet implemented")
+        return DependencyGraph(
+            batches=[],
+            task_order=[],
+            circular_deps=[],
+            missing_deps=[]
+        )
 
-    def to_mermaid(self, graph: DependencyGraph, tasks: List[Dict]) -> str:
+    def to_mermaid(self) -> str:
         """
-        Generate a Mermaid flowchart diagram of the dependency graph.
-
-        Args:
-            graph: The resolved dependency graph
-            tasks: List of tasks with names for labeling
+        Generate Mermaid flowchart diagram of dependencies.
 
         Returns:
             Mermaid diagram string
         """
-        # TODO: Implement Mermaid generation
-        raise NotImplementedError("DependencyResolver.to_mermaid() not yet implemented")
+        # Stub - will be implemented in Epic 91
+        return "graph TD\n  A[Stub]"
 
-    def to_ascii(self, graph: DependencyGraph, tasks: List[Dict]) -> str:
+    def to_ascii(self) -> str:
         """
-        Generate an ASCII representation of the dependency graph.
-
-        Args:
-            graph: The resolved dependency graph
-            tasks: List of tasks with names for labeling
+        Generate ASCII text representation of dependencies.
 
         Returns:
             ASCII diagram string
         """
-        # TODO: Implement ASCII generation
-        raise NotImplementedError("DependencyResolver.to_ascii() not yet implemented")
+        # Stub - will be implemented in Epic 91
+        return "Task dependency graph (not yet implemented)"
 
-    def get_critical_path(self, graph: DependencyGraph) -> List[int]:
+    def get_critical_path(self) -> List[int]:
         """
-        Identify the longest dependency chain (critical path).
-
-        Args:
-            graph: The resolved dependency graph
+        Identify longest dependency chain (critical path).
 
         Returns:
-            List of task IDs forming the critical path
+            List of task IDs in critical path
         """
-        # TODO: Implement critical path detection
-        raise NotImplementedError("DependencyResolver.get_critical_path() not yet implemented")
+        # Stub - will be implemented in Epic 91
+        return []

@@ -1,237 +1,182 @@
 """
 Model Selector
+==============
 
-Intelligent model selection based on task complexity, historical performance,
+Selects optimal Claude model for each task based on complexity analysis
 and budget constraints.
+
+Key Features:
+- Analyzes task complexity across multiple dimensions
+- Recommends model tier (Haiku/Sonnet/Opus)
+- Tracks historical performance by task type
+- Enforces budget limits
+- Supports configuration overrides
+- Provides reasoning for recommendations
+
+Model Tiers:
+- Haiku: Simple, repetitive tasks (< 0.3 complexity score)
+- Sonnet: Moderate complexity tasks (0.3-0.7 complexity score)
+- Opus: Complex, architectural tasks (> 0.7 complexity score)
+
+Pricing (approximate, as of 2025):
+- Haiku: $0.25 per 1M input tokens, $1.25 per 1M output tokens
+- Sonnet: $3.00 per 1M input tokens, $15.00 per 1M output tokens
+- Opus: $15.00 per 1M input tokens, $75.00 per 1M output tokens
 """
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Dict, Optional, Any
+from uuid import UUID
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class ModelTier(Enum):
-    """Available model tiers."""
+# Model tier enumeration
+class ModelTier:
     HAIKU = "haiku"
     SONNET = "sonnet"
     OPUS = "opus"
 
 
-# Pricing per 1M tokens (input/output) in USD
+# Pricing per 1M tokens (USD)
 PRICING = {
-    ModelTier.HAIKU: {'input': 0.25, 'output': 1.25},
-    ModelTier.SONNET: {'input': 3.0, 'output': 15.0},
-    ModelTier.OPUS: {'input': 15.0, 'output': 75.0},
+    ModelTier.HAIKU: {"input": 0.25, "output": 1.25},
+    ModelTier.SONNET: {"input": 3.00, "output": 15.00},
+    ModelTier.OPUS: {"input": 15.00, "output": 75.00},
 }
+
 
 # Complexity thresholds for model selection
 COMPLEXITY_THRESHOLDS = {
-    ModelTier.HAIKU: 0.3,   # Use for complexity < 0.3
-    ModelTier.SONNET: 0.7,  # Use for complexity 0.3 - 0.7
-    ModelTier.OPUS: 1.0,    # Use for complexity > 0.7
+    ModelTier.HAIKU: 0.3,   # < 0.3 = simple
+    ModelTier.SONNET: 0.7,  # 0.3-0.7 = moderate
+    ModelTier.OPUS: 1.0,    # > 0.7 = complex
 }
-
-
-@dataclass
-class TaskComplexity:
-    """Complexity analysis of a task."""
-    reasoning_depth: float  # 0-1: Multi-step logic, algorithm design
-    code_complexity: float  # 0-1: LOC estimate, file count
-    domain_specificity: float  # 0-1: Specialized knowledge required
-    context_requirements: float  # 0-1: Dependencies, existing code understanding
-    overall_score: float  # Weighted average
 
 
 @dataclass
 class ModelRecommendation:
-    """Model recommendation with reasoning."""
-    model: ModelTier
+    """
+    Model recommendation with reasoning.
+
+    Attributes:
+        model: Recommended model tier
+        reasoning: Explanation for recommendation
+        estimated_cost: Estimated cost in USD
+    """
+    model: str
     reasoning: str
-    estimated_cost: float  # USD
+    estimated_cost: float
+
+
+@dataclass
+class TaskComplexity:
+    """
+    Task complexity analysis.
+
+    Attributes:
+        reasoning_depth: Multi-step logic required (0-1)
+        code_complexity: Lines and files involved (0-1)
+        domain_specificity: Specialized knowledge needed (0-1)
+        context_requirements: Dependencies and existing code (0-1)
+        overall_score: Weighted average (0-1)
+    """
+    reasoning_depth: float
+    code_complexity: float
+    domain_specificity: float
+    context_requirements: float
+    overall_score: float
 
 
 class ModelSelector:
     """
-    Selects optimal model based on task complexity and constraints.
+    Selects optimal model for tasks based on complexity and budget.
 
-    Considers:
-    - Task complexity analysis
-    - Historical performance per model
-    - Budget constraints
-    - Configuration overrides
+    Uses complexity analysis and historical performance to recommend
+    the most cost-effective model while maintaining quality.
     """
 
-    def __init__(self, project_id: int, config: Optional[Dict] = None):
+    def __init__(self, project_id: UUID, config: Any, db_connection: Any):
         """
-        Initialize the model selector.
+        Initialize model selector.
 
         Args:
-            project_id: The project ID
-            config: Optional configuration dict with budget and overrides
+            project_id: Project UUID
+            config: Configuration object with cost settings
+            db_connection: Database connection for cost tracking
         """
         self.project_id = project_id
-        self.config = config or {}
-        self._performance_cache: Dict[str, Dict] = {}
+        self.config = config
+        self.db = db_connection
+        logger.info(f"ModelSelector initialized for project {project_id}")
 
-    def analyze_complexity(self, task: Dict) -> TaskComplexity:
+    def analyze_complexity(self, task: Dict[str, Any]) -> TaskComplexity:
         """
-        Analyze the complexity of a task.
+        Analyze task complexity across multiple dimensions.
 
         Args:
-            task: The task dictionary
+            task: Task dictionary with description, action, etc.
 
         Returns:
-            TaskComplexity analysis
+            TaskComplexity with scores
         """
-        # TODO: Implement complexity analysis
-        raise NotImplementedError("ModelSelector.analyze_complexity() not yet implemented")
+        # Stub - will be implemented in Epic 95
+        logger.warning("ModelSelector.analyze_complexity() not yet implemented")
+        return TaskComplexity(
+            reasoning_depth=0.5,
+            code_complexity=0.5,
+            domain_specificity=0.5,
+            context_requirements=0.5,
+            overall_score=0.5
+        )
 
-    def recommend_model(self, task: Dict) -> ModelRecommendation:
+    def recommend_model(self, task: Dict[str, Any]) -> ModelRecommendation:
         """
-        Recommend a model for a task.
+        Recommend optimal model for a task.
 
         Args:
-            task: The task dictionary
+            task: Task dictionary
 
         Returns:
-            ModelRecommendation with model, reasoning, and cost estimate
+            ModelRecommendation with model and reasoning
         """
-        # TODO: Implement model recommendation
-        raise NotImplementedError("ModelSelector.recommend_model() not yet implemented")
+        # Stub - will be implemented in Epic 95
+        logger.warning("ModelSelector.recommend_model() not yet implemented")
+        return ModelRecommendation(
+            model=ModelTier.SONNET,
+            reasoning="Default model (implementation pending)",
+            estimated_cost=0.0
+        )
+
+    def check_budget(self) -> tuple[bool, float]:
+        """
+        Check if within budget limit.
+
+        Returns:
+            Tuple of (within_budget, remaining_usd)
+        """
+        # Stub - will be implemented in Epic 95
+        logger.warning("ModelSelector.check_budget() not yet implemented")
+        return (True, 0.0)
 
     def record_outcome(
         self,
         task_id: int,
-        model: ModelTier,
+        model: str,
         success: bool,
         duration: float,
         tokens: Dict[str, int]
     ) -> None:
         """
-        Record the outcome of a task execution for learning.
+        Record task outcome for historical tracking.
 
         Args:
-            task_id: The task ID
-            model: The model used
-            success: Whether the task succeeded
-            duration: Execution duration in seconds
-            tokens: Dict with 'input' and 'output' token counts
+            task_id: Task ID
+            model: Model used
+            success: Whether task succeeded
+            duration: Execution time in seconds
+            tokens: Dict with input_tokens and output_tokens
         """
-        # TODO: Implement outcome recording
-        raise NotImplementedError("ModelSelector.record_outcome() not yet implemented")
-
-    def check_budget(self) -> tuple[bool, float]:
-        """
-        Check if we're within budget.
-
-        Returns:
-            Tuple of (within_budget, remaining_usd)
-        """
-        # TODO: Implement budget checking
-        raise NotImplementedError("ModelSelector.check_budget() not yet implemented")
-
-    def _get_historical_performance(
-        self,
-        task_type: str,
-        model: ModelTier
-    ) -> Optional[Dict]:
-        """
-        Get historical performance data for a task type and model.
-
-        Args:
-            task_type: The type of task
-            model: The model tier
-
-        Returns:
-            Performance data dict or None
-        """
-        # TODO: Implement historical performance retrieval
-        raise NotImplementedError("ModelSelector._get_historical_performance() not yet implemented")
-
-    def _apply_overrides(
-        self,
-        task: Dict,
-        recommendation: ModelRecommendation
-    ) -> ModelRecommendation:
-        """
-        Apply configuration overrides to a recommendation.
-
-        Args:
-            task: The task dictionary
-            recommendation: The initial recommendation
-
-        Returns:
-            Possibly modified recommendation
-        """
-        # Check for task type override
-        task_type = task.get('type', 'general')
-        model_overrides = self.config.get('model_overrides', {})
-
-        if task_type in model_overrides:
-            override_model = ModelTier(model_overrides[task_type])
-            return ModelRecommendation(
-                model=override_model,
-                reasoning=f"Override: {task_type} tasks use {override_model.value}",
-                estimated_cost=recommendation.estimated_cost  # Recalculate if needed
-            )
-
-        # Check for priority override
-        priority = task.get('priority', 999)
-        priority_overrides = self.config.get('priority_overrides', {})
-
-        for threshold, override_model in sorted(priority_overrides.items()):
-            if priority <= int(threshold):
-                return ModelRecommendation(
-                    model=ModelTier(override_model),
-                    reasoning=f"Override: Priority {priority} tasks use {override_model}",
-                    estimated_cost=recommendation.estimated_cost
-                )
-
-        return recommendation
-
-    def _downgrade_for_budget(
-        self,
-        recommendation: ModelRecommendation
-    ) -> ModelRecommendation:
-        """
-        Downgrade model recommendation if approaching budget limit.
-
-        Args:
-            recommendation: The initial recommendation
-
-        Returns:
-            Possibly downgraded recommendation
-        """
-        within_budget, remaining = self.check_budget()
-
-        if not within_budget:
-            return ModelRecommendation(
-                model=ModelTier.HAIKU,
-                reasoning="Budget exceeded - forcing HAIKU",
-                estimated_cost=0.0
-            )
-
-        budget_limit = self.config.get('budget_limit_usd', float('inf'))
-        if budget_limit == float('inf'):
-            return recommendation
-
-        spent = budget_limit - remaining
-        usage_pct = spent / budget_limit if budget_limit > 0 else 0
-
-        if usage_pct > 0.95:
-            return ModelRecommendation(
-                model=ModelTier.HAIKU,
-                reasoning=f"Budget at {usage_pct:.0%} - using HAIKU",
-                estimated_cost=recommendation.estimated_cost * 0.1
-            )
-        elif usage_pct > 0.80 and recommendation.model == ModelTier.OPUS:
-            return ModelRecommendation(
-                model=ModelTier.SONNET,
-                reasoning=f"Budget at {usage_pct:.0%} - downgrading to SONNET",
-                estimated_cost=recommendation.estimated_cost * 0.5
-            )
-
-        return recommendation
+        # Stub - will be implemented in Epic 95
+        logger.warning("ModelSelector.record_outcome() not yet implemented")

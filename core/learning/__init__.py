@@ -1,19 +1,28 @@
 """
-YokeFlow Self-Learning Module
+Self-Learning Module
+====================
 
-This module provides self-learning capabilities including:
-- ExpertiseManager: Manages domain-specific knowledge accumulation
-- ModelSelector: Intelligent model selection based on task complexity and cost
+This module implements YokeFlow's self-learning system that accumulates
+expertise from completed sessions and optimizes model selection for cost efficiency.
+
+Main Components:
+- ExpertiseManager: Accumulates and manages domain-specific knowledge
+- ModelSelector: Selects optimal model based on task complexity and budget
+
+Usage:
+    from core.learning import ExpertiseManager, ModelSelector
+
+    expertise = ExpertiseManager(project_id, db)
+    await expertise.learn_from_session(session_id, task, logs)
+
+    selector = ModelSelector(project_id, config, db)
+    recommendation = selector.recommend_model(task)
 """
 
-from .expertise_manager import ExpertiseManager, ExpertiseFile
-from .model_selector import ModelSelector, ModelTier, ModelRecommendation, TaskComplexity
+from core.learning.expertise_manager import ExpertiseManager
+from core.learning.model_selector import ModelSelector
 
 __all__ = [
     'ExpertiseManager',
-    'ExpertiseFile',
     'ModelSelector',
-    'ModelTier',
-    'ModelRecommendation',
-    'TaskComplexity',
 ]

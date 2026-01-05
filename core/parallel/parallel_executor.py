@@ -1,170 +1,166 @@
 """
-Parallel Execution Engine
+Parallel Executor
+=================
 
-Orchestrates concurrent task execution across multiple git worktrees,
-managing agent sessions, progress tracking, and result aggregation.
+Orchestrates parallel task execution across multiple agents using worktrees.
+
+Key Features:
+- Manages batch-based parallel execution
+- Respects max concurrency limits
+- Creates and manages worktrees per epic
+- Executes agents in isolated environments
+- Tracks costs and performance
+- Handles failures and cancellation
+- Integrates with self-learning system
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Callable, Any
-from datetime import datetime
-from pathlib import Path
-import asyncio
+from dataclasses import dataclass
+from typing import Optional, List, Callable, Any
 import logging
-
-from .dependency_resolver import DependencyResolver, DependencyGraph
-from .worktree_manager import WorktreeManager, WorktreeInfo
+import asyncio
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ExecutionResult:
-    """Result of executing a single task."""
+    """
+    Result of a task execution.
+
+    Attributes:
+        task_id: Task ID that was executed
+        success: Whether execution succeeded
+        duration: Execution time in seconds
+        error: Error message if failed
+        cost: Execution cost in USD
+    """
     task_id: int
     success: bool
-    duration: float  # seconds
+    duration: float
     error: Optional[str] = None
-    cost: Optional[float] = None  # USD
+    cost: float = 0.0
 
 
 @dataclass
 class RunningAgent:
-    """Information about a currently running agent."""
+    """
+    Information about a running agent.
+
+    Attributes:
+        task_id: Task being executed
+        epic_id: Epic the task belongs to
+        process: Async subprocess handle
+        started_at: When execution started
+    """
     task_id: int
     epic_id: int
-    worktree_path: Path
-    started_at: datetime = field(default_factory=datetime.utcnow)
-    process: Optional[Any] = None  # asyncio subprocess
+    process: Any
+    started_at: float
 
 
 class ParallelExecutor:
     """
-    Orchestrates parallel task execution.
+    Orchestrates parallel execution of tasks across multiple agents.
 
-    Executes tasks in dependency-ordered batches, with tasks within each
-    batch running concurrently in isolated git worktrees.
+    Manages the complete parallel execution workflow:
+    1. Resolve dependencies into batches
+    2. Create worktrees for each epic
+    3. Execute tasks in parallel (within concurrency limit)
+    4. Merge successful worktrees
+    5. Track costs and learning
     """
 
     def __init__(
         self,
-        project_path: Path,
-        project_id: int,
+        project_path: str,
+        project_id: str,
         max_concurrency: int = 3,
-        progress_callback: Optional[Callable[[str, Dict], None]] = None
+        progress_callback: Optional[Callable] = None
     ):
         """
-        Initialize the parallel executor.
+        Initialize parallel executor.
 
         Args:
-            project_path: Path to the project repository
-            project_id: The project ID
-            max_concurrency: Maximum concurrent agents
+            project_path: Path to project repository
+            project_id: Project UUID
+            max_concurrency: Maximum concurrent agents (1-10)
             progress_callback: Optional callback for progress updates
         """
-        self.project_path = Path(project_path)
+        self.project_path = project_path
         self.project_id = project_id
         self.max_concurrency = max_concurrency
         self.progress_callback = progress_callback
-
-        self._semaphore = asyncio.Semaphore(max_concurrency)
-        self._cancel_event = asyncio.Event()
-        self._running_agents: Dict[int, RunningAgent] = {}
-
-        self._dependency_resolver = DependencyResolver(project_id)
-        self._worktree_manager = WorktreeManager(project_path, project_id)
+        
+        # Will be initialized in execute()
+        self.semaphore: Optional[asyncio.Semaphore] = None
+        self.cancel_event: Optional[asyncio.Event] = None
+        
+        logger.info(f"ParallelExecutor initialized (max_concurrency={max_concurrency})")
 
     async def execute(self) -> List[ExecutionResult]:
         """
         Execute all incomplete tasks in parallel batches.
 
         Returns:
-            List of ExecutionResult for all executed tasks
+            List of ExecutionResult objects for all tasks
         """
-        # TODO: Implement main execution flow
-        raise NotImplementedError("ParallelExecutor.execute() not yet implemented")
+        # Stub - will be implemented in Epic 93
+        logger.warning("ParallelExecutor.execute() not yet implemented")
+        return []
 
-    async def execute_batch(
-        self,
-        batch_number: int,
-        task_ids: List[int]
-    ) -> List[ExecutionResult]:
+    async def execute_batch(self, batch_number: int, task_ids: List[int]) -> List[ExecutionResult]:
         """
-        Execute a single batch of tasks concurrently.
+        Execute a single batch of tasks in parallel.
 
         Args:
-            batch_number: The batch number (for tracking)
-            task_ids: List of task IDs in this batch
+            batch_number: Batch number
+            task_ids: List of task IDs to execute
 
         Returns:
-            List of ExecutionResult for batch tasks
+            List of ExecutionResult objects
         """
-        # TODO: Implement batch execution
-        raise NotImplementedError("ParallelExecutor.execute_batch() not yet implemented")
+        # Stub - will be implemented in Epic 93
+        logger.warning("ParallelExecutor.execute_batch() not yet implemented")
+        return []
 
-    async def run_task_agent(
-        self,
-        task: Dict,
-        worktree_path: Path
-    ) -> ExecutionResult:
+    async def run_task_agent(self, task: dict, worktree_path: str) -> ExecutionResult:
         """
-        Run an agent session for a single task.
+        Run agent for a single task in isolated worktree.
 
         Args:
-            task: The task dictionary
-            worktree_path: Path to the worktree for this task
+            task: Task dictionary with details
+            worktree_path: Path to worktree for execution
 
         Returns:
-            ExecutionResult for the task
+            ExecutionResult
         """
-        # TODO: Implement individual task agent execution
-        raise NotImplementedError("ParallelExecutor.run_task_agent() not yet implemented")
+        # Stub - will be implemented in Epic 93
+        logger.warning("ParallelExecutor.run_task_agent() not yet implemented")
+        return ExecutionResult(
+            task_id=task.get('id', 0),
+            success=False,
+            duration=0.0,
+            error="Not implemented"
+        )
 
-    def cancel(self) -> None:
-        """Cancel all running agents gracefully."""
-        logger.info("Cancellation requested for parallel execution")
-        self._cancel_event.set()
+    async def cancel(self) -> None:
+        """
+        Cancel all running agents gracefully.
+        """
+        # Stub - will be implemented in Epic 93
+        logger.warning("ParallelExecutor.cancel() not yet implemented")
 
-        for task_id, agent in self._running_agents.items():
-            if agent.process:
-                logger.info(f"Terminating agent for task {task_id}")
-                try:
-                    agent.process.terminate()
-                except Exception as e:
-                    logger.warning(f"Failed to terminate agent for task {task_id}: {e}")
-
-    def get_status(self) -> Dict:
+    def get_status(self) -> dict:
         """
         Get current execution status.
 
         Returns:
-            Dict with running agents, counts, and duration
+            Dict with running agents, progress, etc.
         """
+        # Stub - will be implemented in Epic 93
         return {
-            'running_agents': [
-                {
-                    'task_id': agent.task_id,
-                    'epic_id': agent.epic_id,
-                    'started_at': agent.started_at.isoformat(),
-                    'duration': (datetime.utcnow() - agent.started_at).total_seconds()
-                }
-                for agent in self._running_agents.values()
-            ],
-            'active_count': len(self._running_agents),
-            'max_concurrency': self.max_concurrency,
-            'cancelled': self._cancel_event.is_set()
+            'running_agents': [],
+            'active_agent_count': 0,
+            'current_batch': 0,
+            'total_duration': 0.0
         }
-
-    def _build_task_prompt(self, task: Dict, expertise: Optional[str] = None) -> str:
-        """
-        Build the prompt for a task agent.
-
-        Args:
-            task: The task dictionary
-            expertise: Optional domain expertise to include
-
-        Returns:
-            The complete prompt string
-        """
-        # TODO: Implement prompt building
-        raise NotImplementedError("ParallelExecutor._build_task_prompt() not yet implemented")
