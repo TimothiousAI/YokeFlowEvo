@@ -467,9 +467,104 @@ class WorktreeManager:
 
         Args:
             epic_id: Epic ID
+
+        Raises:
+            GitCommandError: If cleanup fails (non-fatal errors are logged)
         """
-        # Stub - will be implemented in task 880
-        logger.warning("WorktreeManager.cleanup_worktree() not yet implemented")
+        logger.info(f"Cleaning up worktree for epic {epic_id}")
+
+        # Get worktree info
+        if epic_id not in self._worktrees:
+            logger.warning(f"No worktree found for epic {epic_id}, nothing to clean up")
+            return
+
+        worktree_info = self._worktrees[epic_id]
+        worktree_path = Path(worktree_info.path)
+        branch_name = worktree_info.branch
+
+        # Remove worktree using git worktree remove
+        try:
+            if worktree_path.exists():
+                logger.info(f"Removing worktree: {worktree_path}")
+                try:
+                    # Try normal remove first
+                    await self._run_git(
+                        ['worktree', 'remove', str(worktree_path)],
+                        timeout=30
+                    )
+                    logger.info(f"Worktree removed successfully")
+                except GitCommandError as e:
+                    # If normal remove fails, try force remove
+                    if 'contains modified or untracked files' in str(e) or 'uncommitted changes' in str(e):
+                        logger.warning(f"Worktree has uncommitted changes, forcing removal")
+                        await self._run_git(
+                            ['worktree', 'remove', '--force', str(worktree_path)],
+                            timeout=30
+                        )
+                        logger.info(f"Worktree force-removed successfully")
+                    else:
+                        raise
+            else:
+                logger.warning(f"Worktree directory already removed: {worktree_path}")
+
+        except GitCommandError as e:
+            # If git worktree remove fails, try manual directory cleanup
+            logger.warning(f"Git worktree remove failed: {e}")
+            if worktree_path.exists():
+                logger.info(f"Attempting manual directory cleanup")
+                try:
+                    import shutil
+                    shutil.rmtree(worktree_path, ignore_errors=True)
+                    logger.info(f"Worktree directory removed manually")
+                except Exception as cleanup_error:
+                    logger.error(f"Failed to remove worktree directory: {cleanup_error}")
+
+        # Delete branch if fully merged
+        try:
+            # Check if branch exists
+            try:
+                await self._run_git(['rev-parse', '--verify', branch_name], timeout=10)
+                branch_exists = True
+            except GitCommandError:
+                branch_exists = False
+                logger.info(f"Branch {branch_name} already deleted")
+
+            if branch_exists:
+                # Check if branch is fully merged into current branch
+                try:
+                    # Try to delete with -d (safe delete - only if merged)
+                    # This will fail if branch has unmerged changes
+                    await self._run_git(['branch', '-d', branch_name], timeout=30)
+                    logger.info(f"Branch deleted successfully (was fully merged)")
+                except GitCommandError as e:
+                    # Branch has unmerged changes
+                    if 'not fully merged' in str(e):
+                        logger.warning(f"Branch {branch_name} has unmerged changes")
+                        logger.info(f"Use 'git branch -D {branch_name}' to force delete if needed")
+                        # Don't force delete - let user decide
+                    else:
+                        # Other error
+                        logger.warning(f"Could not delete branch: {e}")
+
+
+        except Exception as e:
+            logger.error(f"Error during branch cleanup: {e}")
+
+        # Update database to mark as cleaned up
+        if self.db:
+            try:
+                from uuid import UUID
+                await self.db.update_worktree(
+                    worktree_id=epic_id,  # Note: This assumes worktree_id = epic_id
+                    status='cleanup'
+                )
+                logger.info(f"Database updated with cleanup status")
+            except Exception as e:
+                logger.warning(f"Failed to update database: {e}")
+
+        # Remove from memory
+        del self._worktrees[epic_id]
+        logger.info(f"Worktree cleanup complete for epic {epic_id}")
 
     async def _run_git(
         self,
