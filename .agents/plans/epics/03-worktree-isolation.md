@@ -561,8 +561,110 @@ class TestWorktreeIntegration:
 
 ---
 
+---
+
+### 3.8 Windows Path Sanitization (Research Finding)
+
+**Description:** Implement comprehensive path sanitization based on Automaker patterns.
+
+**Background:** Research of Automaker codebase revealed comprehensive Windows handling that we should adopt.
+
+**Implementation:**
+
+```python
+def _sanitize_branch_name(self, branch: str) -> str:
+    """
+    Sanitize branch name for Windows compatibility.
+    Based on Automaker patterns (worktree-metadata.ts)
+    """
+    # Windows invalid characters: : * ? " < > |
+    # Forward/backslashes (path separators)
+    safe_branch = re.sub(r'[/\\:*?"<>|]', '-', branch)
+
+    # Spaces to underscores
+    safe_branch = re.sub(r'\s+', '_', safe_branch)
+
+    # Trailing dots (Windows-specific issue)
+    safe_branch = re.sub(r'\.+$', '', safe_branch)
+
+    # Collapse multiple dashes
+    safe_branch = re.sub(r'-+', '-', safe_branch)
+
+    # Remove leading/trailing dashes
+    safe_branch = safe_branch.strip('-')
+
+    # Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    if re.match(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$', safe_branch, re.I):
+        safe_branch = f'_{safe_branch}'
+
+    # Max length: 200 chars for path safety
+    if len(safe_branch) > 200:
+        safe_branch = safe_branch[:200]
+
+    return safe_branch
+
+def _normalize_path(self, path: str) -> str:
+    """Normalize path for cross-platform consistency"""
+    return path.replace('\\', '/')
+```
+
+**Acceptance Criteria:**
+- [ ] Handles Windows reserved names (CON, PRN, etc.)
+- [ ] Removes invalid characters
+- [ ] Handles trailing dots
+- [ ] Enforces max path length
+
+---
+
+### 3.9 Pre-Merge Conflict Detection
+
+**Description:** Add conflict detection BEFORE attempting merge.
+
+**Background:** Research found Automaker has no pre-merge validation - we should add it.
+
+**Implementation:**
+
+```python
+async def detect_conflicts_before_merge(self, epic_id: int) -> Dict:
+    """
+    Detect conflicts before merge attempt.
+    Returns list of conflicting files if any.
+    """
+    worktree = self._active_worktrees.get(epic_id)
+    if not worktree:
+        return {'has_conflicts': False, 'files': []}
+
+    main_branch = await self._get_main_branch()
+
+    # Use git merge-tree for conflict detection (doesn't modify working tree)
+    try:
+        result = await self._run_git(
+            ['merge-tree', '--write-tree', main_branch, worktree.branch],
+            self.project_path
+        )
+        return {'has_conflicts': False, 'files': []}
+    except GitCommandError as e:
+        # Parse conflicting files from output
+        conflicts = re.findall(r'CONFLICT \(.*?\): (.+)', e.stderr)
+        return {
+            'has_conflicts': len(conflicts) > 0,
+            'files': conflicts,
+            'recommendation': 'Resolve conflicts manually or merge other epics first'
+        }
+```
+
+**Acceptance Criteria:**
+- [ ] Detects conflicts without modifying tree
+- [ ] Returns list of conflicting files
+- [ ] Provides resolution recommendations
+
+---
+
 ## Notes
 
 - Windows: Long path names may cause issues, consider using short epic IDs
 - Consider automatic cleanup of stale worktrees on startup
 - May need to handle case where main branch has advanced during execution
+- **Research Finding**: Each worktree needs SEPARATE dependency installation (node_modules, venv) - no sharing
+- **Research Finding**: Use `--force` flag for cleanup operations to handle edge cases
+- **Research Finding**: Auto-create initial commit if repo has no HEAD (fresh repos)

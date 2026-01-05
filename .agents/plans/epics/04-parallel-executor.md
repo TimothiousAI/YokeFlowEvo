@@ -833,3 +833,46 @@ class TestParallelIntegration:
 - Consider adding retry logic for failed tasks
 - May need connection pooling for many concurrent database operations
 - Consider memory usage with many concurrent agents
+
+---
+
+## Research Findings (SDK Analysis)
+
+**Claude Agent SDK Source Code Analysis (v0.1.18):**
+
+| Finding | Detail |
+|---------|--------|
+| **Rate Limiting** | None in SDK - delegated to Claude Code CLI |
+| **Concurrency Control** | None in SDK - each `query()` spawns new subprocess |
+| **Parallel Limits** | No hardcoded limits - only OS process limits apply |
+| **Connection Pooling** | None - fresh CLI process per query |
+
+**Key Implications:**
+
+1. **SDK poses NO barriers** to parallel execution - constraints are external
+2. **Each `query()` = separate subprocess** - no connection reuse
+3. **Rate limits** handled by Claude Code CLI, not SDK
+4. **Safe to run multiple concurrent** `query()` calls with `asyncio.gather()`
+
+**Architecture:**
+```
+Your Code (query() calls)
+         │
+         ▼
+Claude Agent SDK (Python)
+  - Async message streaming
+  - NO rate limiting
+  - NO connection pooling
+         │
+         ▼
+SubprocessCLITransport
+  - Spawns NEW Claude Code CLI process per query()
+  - Passes CLAUDE_CODE_OAUTH_TOKEN via environment
+         │
+         ▼
+Claude Code CLI (handles actual API calls, auth)
+```
+
+**CRITICAL PREREQUISITE:**
+- Epic 01 Task 1.6 (MCP Transaction Utilities) MUST be completed first
+- Without transaction safety, concurrent agents will cause race conditions on task/epic status updates
