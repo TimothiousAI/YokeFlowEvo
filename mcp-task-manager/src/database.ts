@@ -387,7 +387,9 @@ export class TaskDatabase {
         created_at,
         completed_at,
         session_notes,
-        CASE WHEN done = true THEN 1 ELSE 0 END as done
+        CASE WHEN done = true THEN 1 ELSE 0 END as done,
+        (metadata->>'depends_on')::jsonb as depends_on,
+        metadata->>'dependency_type' as dependency_type
       FROM tasks
       WHERE project_id = $1
     `;
@@ -422,7 +424,9 @@ export class TaskDatabase {
         t.completed_at,
         t.session_notes,
         CASE WHEN t.done = true THEN 1 ELSE 0 END as done,
-        e.name as epic_name
+        e.name as epic_name,
+        (t.metadata->>'depends_on')::jsonb as depends_on,
+        t.metadata->>'dependency_type' as dependency_type
       FROM tasks t
       JOIN epics e ON t.epic_id = e.id
       WHERE t.id = $1 AND t.project_id = $2
@@ -509,9 +513,18 @@ export class TaskDatabase {
     // Get next priority if not specified
     const priority = task.priority ?? await this.getNextTaskPriority(String(task.epic_id));
 
+    // Build metadata with dependencies
+    const metadata: any = {};
+    if (task.depends_on && task.depends_on.length > 0) {
+      metadata.depends_on = task.depends_on.map(id => String(id));
+    }
+    if (task.dependency_type) {
+      metadata.dependency_type = task.dependency_type;
+    }
+
     const result = await this.query<Task>(`
-      INSERT INTO tasks (epic_id, project_id, description, action, priority)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO tasks (epic_id, project_id, description, action, priority, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING
         id::text,
         epic_id::text,
@@ -522,8 +535,10 @@ export class TaskDatabase {
         created_at,
         completed_at,
         session_notes,
-        CASE WHEN done = true THEN 1 ELSE 0 END as done
-    `, [String(task.epic_id), this.projectId, task.description, task.action, priority]);
+        CASE WHEN done = true THEN 1 ELSE 0 END as done,
+        (metadata->>'depends_on')::jsonb as depends_on,
+        metadata->>'dependency_type' as dependency_type
+    `, [String(task.epic_id), this.projectId, task.description, task.action, priority, JSON.stringify(metadata)]);
 
     return result[0];
   }

@@ -26,6 +26,8 @@ export interface Task {
   created_at: string;
   completed_at: string | null;
   session_notes: string | null;
+  depends_on?: EntityId[] | null;
+  dependency_type?: 'hard' | 'soft' | null;
 }
 
 export interface Test {
@@ -105,6 +107,8 @@ export interface NewTask {
   description: string;
   action: string;
   priority?: number;
+  depends_on?: EntityId[];
+  dependency_type?: 'hard' | 'soft';
 }
 
 export interface NewTest {

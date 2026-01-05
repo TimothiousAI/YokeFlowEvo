@@ -168,6 +168,18 @@ const tools: Tool[] = [
         priority: {
           type: 'number',
           description: 'Priority within the epic (optional, auto-increments)'
+        },
+        depends_on: {
+          type: 'array',
+          items: {
+            ...idFieldSchema
+          },
+          description: 'Array of task IDs this task depends on (optional)'
+        },
+        dependency_type: {
+          type: 'string',
+          enum: ['hard', 'soft'],
+          description: 'Type of dependency: "hard" (blocking) or "soft" (non-blocking). Defaults to "hard".'
         }
       },
       required: ['epic_id', 'description', 'action']
@@ -268,7 +280,17 @@ const tools: Tool[] = [
             properties: {
               description: { type: 'string' },
               action: { type: 'string' },
-              priority: { type: 'number' }
+              priority: { type: 'number' },
+              depends_on: {
+                type: 'array',
+                items: { ...idFieldSchema },
+                description: 'Array of task IDs this task depends on'
+              },
+              dependency_type: {
+                type: 'string',
+                enum: ['hard', 'soft'],
+                description: 'Type of dependency: "hard" or "soft". Defaults to "hard".'
+              }
             },
             required: ['description', 'action']
           },
@@ -465,11 +487,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
 
       case 'create_task':
+        // Validate depends_on references if provided
+        if (args?.depends_on && Array.isArray(args.depends_on)) {
+          for (const depId of args.depends_on) {
+            const depTask = await db.getTask(depId);
+            if (!depTask) {
+              throw new Error(`Invalid dependency: task ${depId} does not exist`);
+            }
+          }
+        }
+
         const newTask: NewTask = {
           epic_id: args?.epic_id as any,
           description: args?.description as string,
           action: args?.action as string,
-          priority: args?.priority as number
+          priority: args?.priority as number,
+          depends_on: args?.depends_on as any[] | undefined,
+          dependency_type: args?.dependency_type as string | undefined
         };
         const createdTask = await db.createTask(newTask);
         return {
