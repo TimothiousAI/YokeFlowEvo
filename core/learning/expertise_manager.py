@@ -253,7 +253,25 @@ class ExpertiseManager:
                         content['techniques'].append(pattern)
                         learnings_added.append(f"Technique: {pattern['name']}")
 
-            # Update core files list
+                # Extract tool usage patterns
+                tool_patterns = self._extract_tool_patterns(logs)
+                if 'patterns' not in content:
+                    content['patterns'] = []
+
+                for tool_pattern in tool_patterns:
+                    # Check if pattern already exists
+                    existing = any(p.get('name') == tool_pattern['name'] for p in content['patterns'])
+                    if not existing:
+                        content['patterns'].append(tool_pattern)
+                        learnings_added.append(f"Pattern: {tool_pattern['name']}")
+
+            # Update core files list with modified files
+            modified_files = self._extract_modified_files(logs)
+            for file_path in modified_files:
+                if file_path not in content['core_files'] and len(content['core_files']) < 50:
+                    content['core_files'].append(file_path)
+
+            # Also add files from generic file path extraction
             for file_path in file_paths:
                 if file_path not in content['core_files'] and len(content['core_files']) < 50:
                     content['core_files'].append(file_path)
@@ -339,6 +357,118 @@ class ExpertiseManager:
             })
 
         return patterns
+
+    def _extract_tool_patterns(self, logs: str) -> List[Dict[str, Any]]:
+        """
+        Extract tool usage patterns from logs.
+
+        Detects sequences like Read -> Edit -> Test and other successful workflows.
+
+        Args:
+            logs: Session log content
+
+        Returns:
+            List of pattern dictionaries with name, tools, and description
+        """
+        patterns = []
+
+        # Detect Read -> Edit -> Test sequence
+        if 'Read' in logs and 'Edit' in logs:
+            # Check order (Read should come before Edit)
+            read_pos = logs.find('Read')
+            edit_pos = logs.find('Edit')
+
+            if read_pos < edit_pos:
+                pattern = {
+                    'name': 'Read-Edit workflow',
+                    'tools': ['Read', 'Edit'],
+                    'description': 'Read file to understand context, then edit with changes'
+                }
+
+                # Check if followed by testing
+                if 'test' in logs[edit_pos:].lower() or 'pytest' in logs[edit_pos:].lower():
+                    pattern['name'] = 'Read-Edit-Test workflow'
+                    pattern['tools'].append('Test')
+                    pattern['description'] += ', followed by testing'
+
+                patterns.append(pattern)
+
+        # Detect Write -> Bash sequence (e.g., creating a file then running it)
+        if 'Write' in logs and 'Bash' in logs:
+            write_pos = logs.find('Write')
+            bash_pos = logs.find('Bash')
+
+            if write_pos < bash_pos:
+                patterns.append({
+                    'name': 'Write-Execute workflow',
+                    'tools': ['Write', 'Bash'],
+                    'description': 'Create file then execute with bash command'
+                })
+
+        # Detect Grep -> Read sequence (search then examine)
+        if 'Grep' in logs and 'Read' in logs:
+            grep_pos = logs.find('Grep')
+            read_pos = logs.find('Read')
+
+            if grep_pos < read_pos:
+                patterns.append({
+                    'name': 'Search-Examine workflow',
+                    'tools': ['Grep', 'Read'],
+                    'description': 'Search for pattern, then read matching files'
+                })
+
+        # Detect browser verification pattern
+        if 'browser' in logs.lower() and ('screenshot' in logs.lower() or 'navigate' in logs.lower()):
+            patterns.append({
+                'name': 'Browser verification workflow',
+                'tools': ['Browser'],
+                'description': 'Verify changes through browser testing'
+            })
+
+        return patterns
+
+    def _extract_modified_files(self, logs: str) -> List[str]:
+        """
+        Extract list of modified files from logs.
+
+        Looks for Edit and Write tool calls to identify changed files.
+
+        Args:
+            logs: Session log content
+
+        Returns:
+            List of file paths that were modified
+        """
+        import re
+        modified_files = set()
+
+        # Look for Edit tool calls: Edit(file_path="...")
+        edit_pattern = r'Edit\([^)]*file_path["\s]*[:=]["\s]*([^"\']+)["\']'
+        for match in re.finditer(edit_pattern, logs):
+            file_path = match.group(1)
+            if file_path and not file_path.startswith('<'):
+                modified_files.add(file_path)
+
+        # Look for Write tool calls: Write(file_path="...")
+        write_pattern = r'Write\([^)]*file_path["\s]*[:=]["\s]*([^"\']+)["\']'
+        for match in re.finditer(write_pattern, logs):
+            file_path = match.group(1)
+            if file_path and not file_path.startswith('<'):
+                modified_files.add(file_path)
+
+        # Also look for simple file mentions in edit/write contexts
+        if 'Edit' in logs or 'Write' in logs:
+            # Match file paths with extensions
+            for match in re.finditer(r'[\w/\\]+\.\w+', logs):
+                path = match.group(0)
+                if '/' in path or '\\' in path:
+                    # Check if it appears near Edit/Write mentions
+                    pos = logs.find(path)
+                    nearby = logs[max(0, pos-100):min(len(logs), pos+100)]
+                    if 'Edit' in nearby or 'Write' in nearby:
+                        modified_files.add(path)
+
+        return sorted(list(modified_files))[:20]  # Limit to 20 files
 
     async def validate_expertise(self, domain: str) -> Dict[str, Any]:
         """
