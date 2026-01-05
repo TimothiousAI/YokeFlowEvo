@@ -27,13 +27,15 @@ Pricing (approximate, as of 2025):
 from dataclasses import dataclass
 from typing import Dict, Optional, Any
 from uuid import UUID
+from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 # Model tier enumeration
-class ModelTier:
+class ModelTier(Enum):
+    """Claude model tiers in order of capability and cost."""
     HAIKU = "haiku"
     SONNET = "sonnet"
     OPUS = "opus"
@@ -49,9 +51,10 @@ PRICING = {
 
 # Complexity thresholds for model selection
 COMPLEXITY_THRESHOLDS = {
-    ModelTier.HAIKU: 0.3,   # < 0.3 = simple
-    ModelTier.SONNET: 0.7,  # 0.3-0.7 = moderate
-    ModelTier.OPUS: 1.0,    # > 0.7 = complex
+    "haiku_max": 0.3,    # Use HAIKU if overall_score < 0.3
+    "sonnet_min": 0.3,   # Use SONNET if overall_score >= 0.3
+    "sonnet_max": 0.7,   # Use SONNET if overall_score <= 0.7
+    "opus_min": 0.7      # Use OPUS if overall_score > 0.7
 }
 
 
@@ -61,13 +64,15 @@ class ModelRecommendation:
     Model recommendation with reasoning.
 
     Attributes:
-        model: Recommended model tier
+        model: Recommended model tier (ModelTier enum)
         reasoning: Explanation for recommendation
         estimated_cost: Estimated cost in USD
+        complexity: TaskComplexity analysis (optional)
     """
-    model: str
+    model: ModelTier
     reasoning: str
     estimated_cost: float
+    complexity: Optional['TaskComplexity'] = None
 
 
 @dataclass
