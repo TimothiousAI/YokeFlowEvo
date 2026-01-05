@@ -388,7 +388,7 @@ export default function ProjectDetailPage() {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center max-w-md">
-          <div className="text-red-500 text-5xl mb-4">⚠️</div>
+          <div className="text-red-500 text-5xl mb-4">[!]</div>
           <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Project Not Found</h2>
           <p className="text-gray-600 dark:text-gray-400 mb-4">{error || 'Project does not exist'}</p>
           <Link
@@ -407,7 +407,7 @@ export default function ProjectDetailPage() {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <div className="text-4xl mb-4">⏳</div>
+          <div className="text-4xl mb-4">[...]</div>
           <p className="text-gray-600 dark:text-gray-400">Loading project...</p>
         </div>
       </div>
@@ -496,7 +496,7 @@ export default function ProjectDetailPage() {
             )}
             {projectSettings?.sandbox_type && (
               <span className="px-2 py-1 rounded bg-gray-700/50 text-gray-300 border border-gray-600/50 text-xs font-mono">
-                {projectSettings.sandbox_type === 'docker' ? '🐳 Docker' : '💻 Local'}
+                {projectSettings.sandbox_type === 'docker' ? 'Docker' : 'Local'}
               </span>
             )}
             {isComplete && (
@@ -611,7 +611,7 @@ export default function ProjectDetailPage() {
             <AlertCircle className="w-5 h-5 text-orange-400 mt-0.5 flex-shrink-0" />
             <div className="flex-1">
               <h3 className="font-semibold text-orange-300 mb-1">
-                ⚠️ Using API Key (Credit-Based Billing)
+                [!] Using API Key (Credit-Based Billing)
               </h3>
               <p className="text-sm text-orange-200/80 mb-2">
                 {apiKeyWarning}
@@ -629,7 +629,7 @@ export default function ProjectDetailPage() {
                   <li>Restart API server to use CLAUDE_CODE_OAUTH_TOKEN instead</li>
                 </ul>
                 <p className="mt-2 text-orange-300">
-                  💡 <strong>Cost difference:</strong> Membership plan (via OAuth) is significantly cheaper than credit-based API usage.
+                  [*] <strong>Cost difference:</strong> Membership plan (via OAuth) is significantly cheaper than credit-based API usage.
                 </p>
               </div>
             </div>
@@ -752,7 +752,6 @@ export default function ProjectDetailPage() {
               }`}
             >
               Quality
-              <span className="ml-2 text-sm">📊</span>
             </button>
             <button
               onClick={() => setActiveTab('logs')}
@@ -763,7 +762,6 @@ export default function ProjectDetailPage() {
               }`}
             >
               Logs
-              <span className="ml-2 text-sm">📄</span>
             </button>
             <button
               onClick={() => setActiveTab('screenshots')}
@@ -774,7 +772,6 @@ export default function ProjectDetailPage() {
               }`}
             >
               Screenshots
-              <span className="ml-2 text-sm">📸</span>
             </button>
             <button
               onClick={() => setActiveTab('interventions')}
@@ -809,7 +806,7 @@ export default function ProjectDetailPage() {
               }`}
             >
               Costs
-              <span className="ml-2 text-sm">💰</span>
+              <span className="ml-2 text-sm">[$]</span>
             </button>
           </div>
 

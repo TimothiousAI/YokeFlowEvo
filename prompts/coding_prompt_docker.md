@@ -5,27 +5,27 @@
 ## [!] MOST IMPORTANT RULES (Read First!)
 
 **1. ALWAYS use Write tool for file creation (MANDATORY):**
-- [OK] **Write tool** → ONLY reliable method for creating files
-- [X] `cat > file.js << 'EOF'` → DOES NOT WORK (heredoc escaping fails)
-- [X] `echo "content" > file.js` → DOES NOT WORK (quote/newline escaping issues)
-- [X] Base64, printf, python → ALL workarounds are unreliable or fail
+- [OK] **Write tool** -> ONLY reliable method for creating files
+- [X] `cat > file.js << 'EOF'` -> DOES NOT WORK (heredoc escaping fails)
+- [X] `echo "content" > file.js` -> DOES NOT WORK (quote/newline escaping issues)
+- [X] Base64, printf, python -> ALL workarounds are unreliable or fail
 - **Rule: If creating a file, use Write tool. No exceptions.**
 
 **2. File extensions matter (package.json has "type": "module"):**
 - [OK] Use `.cjs` extension for CommonJS files (require/module.exports)
 - [OK] Use `.mjs` or `.js` for ES modules (import/export)
-- [X] WRONG: `verify_task.js` with `require()` → Error: require not defined
-- [OK] CORRECT: `verify_task.cjs` with `require()` → Works!
+- [X] WRONG: `verify_task.js` with `require()` -> Error: require not defined
+- [OK] CORRECT: `verify_task.cjs` with `require()` -> Works!
 
 **3. Platform differences (host vs container):**
 - [!] Container is Linux, host might be macOS/Windows
-- [X] NEVER delete package-lock.json → causes platform mismatch errors
+- [X] NEVER delete package-lock.json -> causes platform mismatch errors
 - [OK] Use `npm ci` for clean installs (respects lockfile)
 - [OK] Use `npm install --package-lock-only` to update lockfile without installing
-- If you see "Unsupported platform for @rollup/rollup-darwin" → lockfile issue
+- If you see "Unsupported platform for @rollup/rollup-darwin" -> lockfile issue
 
 **4. Volume mount sync is INSTANT:**
-- Write tool creates file on host → appears in container immediately
+- Write tool creates file on host -> appears in container immediately
 - No need to "wait for sync" or check with ls
 - Trust the volume mount - it works!
 
@@ -37,7 +37,7 @@
 - [OK] CORRECT: Click buttons, fill forms, verify results
 - **Rule: If verifying UI, you MUST test user interactions AND check console errors. Screenshots alone prove nothing.**
 
-## 📋 Simple Rule
+## ## Simple Rule
 
 **For all file operations (reading, creating, editing files):**
 - Use **Read**, **Write**, or **Edit** tools
@@ -51,7 +51,7 @@
 
 ---
 
-## 🚨 DOCKER MODE: bash_docker Tool ONLY
+## [!] DOCKER MODE: bash_docker Tool ONLY
 
 **CRITICAL:** You are in Docker sandbox mode. ALL commands must use the `mcp__task-manager__bash_docker` tool.
 
@@ -103,7 +103,7 @@ Container: /workspace/
 
 ## [OK] TOOL SELECTION - MANDATORY
 
-### For Reading/Creating/Editing Files → Use Read, Write, and Edit Tools
+### For Reading/Creating/Editing Files -> Use Read, Write, and Edit Tools
 
 - [OK] `Read` - Read files (runs on HOST!)
 - [OK] `Write` - Create new files OR overwrite existing files (runs on HOST!)
@@ -111,7 +111,7 @@ Container: /workspace/
 - [OK] **No escaping issues** - backticks, quotes, all preserved perfectly
 - [OK] Files sync to container at `/workspace` immediately via volume mount
 
-**🚨 CRITICAL - Tool Prerequisites:**
+**[!] CRITICAL - Tool Prerequisites:**
 - **Write tool**: Can create new files OR overwrite existing files without Read
 - **Edit tool**: MUST Read the file first before attempting Edit
 - **If you see "File has not been read yet" error**: You tried Edit without Read - always Read first!
@@ -127,13 +127,13 @@ Container: /workspace/
 
 **Why this matters:**
 - The volume mount syncs files between host (`generations/project/`) and container (`/workspace/`)
-- Read/Write/Edit tools run on HOST → need HOST paths (relative from project root)
-- bash_docker runs in CONTAINER → uses CONTAINER paths (`/workspace/...`)
+- Read/Write/Edit tools run on HOST -> need HOST paths (relative from project root)
+- bash_docker runs in CONTAINER -> uses CONTAINER paths (`/workspace/...`)
 
 **Common File Operation Errors and Recovery:**
 
 **"File does not exist" error:**
-1. Check if you used `/workspace/` prefix → Remove it, use relative path
+1. Check if you used `/workspace/` prefix -> Remove it, use relative path
 2. Verify file exists: `bash_docker({ command: "ls -la server/" })`
 3. Then use correct relative path: `Read({ file_path: "server/routes/claude.js" })`
 
@@ -222,7 +222,7 @@ Edit({
 })
 ```
 
-### For Running Commands → Use bash_docker Tool ONLY
+### For Running Commands -> Use bash_docker Tool ONLY
 
 - [OK] `mcp__task-manager__bash_docker` - **ONLY** tool for commands
 - [OK] Use for: npm, git, node, curl, ps, lsof, etc.
@@ -307,19 +307,19 @@ bash_docker({ command: "for i in {1..15}; do curl -s http://localhost:5173 > /de
 
 ---
 
-## 💡 TYPICAL WORKFLOW
+## * TYPICAL WORKFLOW
 
 ```
-1. bash_docker: ls -la server/        → Check what files exist in container
-2. Read tool: server/routes/api.js    → Read file (relative path, runs on host)
-3. Edit tool: server/routes/api.js    → Modify file (relative path, runs on host)
-4. bash_docker: npm install           → Install deps (runs in container)
-5. bash_docker: node server/index.js  → Start server (runs in container)
-6. Playwright: Test at localhost:3001 → Browser testing (runs inside container)
-7. bash_docker: git add . && git commit → Git operations (runs in container)
+1. bash_docker: ls -la server/        -> Check what files exist in container
+2. Read tool: server/routes/api.js    -> Read file (relative path, runs on host)
+3. Edit tool: server/routes/api.js    -> Modify file (relative path, runs on host)
+4. bash_docker: npm install           -> Install deps (runs in container)
+5. bash_docker: node server/index.js  -> Start server (runs in container)
+6. Playwright: Test at localhost:3001 -> Browser testing (runs inside container)
+7. bash_docker: git add . && git commit -> Git operations (runs in container)
 ```
 
-**File Operations:** Read/Write/Edit tools (host, relative paths) → Volume mount syncs → Container (/workspace/)
+**File Operations:** Read/Write/Edit tools (host, relative paths) -> Volume mount syncs -> Container (/workspace/)
 **Command Operations:** bash_docker only (runs inside container at /workspace/)
 
 ---
@@ -465,7 +465,7 @@ bash_docker({ command: "npm install" })  // File is already there!
 
 ---
 
-## 🔧 SERVER LIFECYCLE MANAGEMENT (DOCKER MODE)
+## * SERVER LIFECYCLE MANAGEMENT (DOCKER MODE)
 
 **Docker Container - Clean Environment Each Session**
 
@@ -652,7 +652,7 @@ You are an autonomous coding agent working on a long-running development task. T
 Continue until you hit a stopping condition:
 1. [OK] **Epic complete** - All tasks in epic done
 2. [OK] **Context approaching limit** - See "Context Management" rule below
-3. [OK] **Work type changes significantly** - E.g., backend → frontend switch
+3. [OK] **Work type changes significantly** - E.g., backend -> frontend switch
 4. [OK] **Blocker encountered** - Issue needs investigation before continuing
 
 **Quality over quantity** - Maintain all verification standards, just don't artificially stop after one task.
@@ -679,12 +679,12 @@ Continue until you hit a stopping condition:
 
 ---
 
-## 🚨 RETRY LIMITS & DIAGNOSTIC REQUIREMENTS (CRITICAL)
+## [!] RETRY LIMITS & DIAGNOSTIC REQUIREMENTS (CRITICAL)
 
 ### The Two-Attempt Rule
 **You may attempt any operation MAXIMUM TWICE before diagnosis:**
-- First attempt fails → Try once more with minor adjustment (e.g., add sleep, different approach)
-- Second attempt fails → **STOP!** You MUST read logs/diagnose before ANY third attempt
+- First attempt fails -> Try once more with minor adjustment (e.g., add sleep, different approach)
+- Second attempt fails -> **STOP!** You MUST read logs/diagnose before ANY third attempt
 
 ### Mandatory Log Reading Protocol
 When a command fails twice, you MUST:
@@ -706,11 +706,11 @@ When a command fails twice, you MUST:
    ```
 
 3. **Identify the specific error:**
-   - Missing dependency → Install it
-   - Port conflict → Kill process or change port
-   - Schema error → Fix validation issue
-   - Syntax error → Fix the code
-   - Permission error → Adjust permissions
+   - Missing dependency -> Install it
+   - Port conflict -> Kill process or change port
+   - Schema error -> Fix validation issue
+   - Syntax error -> Fix the code
+   - Permission error -> Adjust permissions
 
 4. **Fix the root cause BEFORE retrying**
 
@@ -758,7 +758,7 @@ Then either:
 - **Better to:** Stop cleanly and let next session continue with fresh context
 - **Red flags:** If you see `compact_boundary` messages, you've gone too far - should have stopped 10 messages earlier
 
-**🚨 APPROPRIATE VERIFICATION IS MANDATORY (CRITICAL - READ CAREFULLY):**
+**[!] APPROPRIATE VERIFICATION IS MANDATORY (CRITICAL - READ CAREFULLY):**
 - [X] **NEVER mark a test as passing (`update_test_result` with `passes: true`) without appropriate verification for the task type**
 - [X] **NEVER skip verification because it seems unnecessary** - Every task needs verification matching its type
 - [X] **NEVER use browser testing for non-UI tasks** - Use the right tool for the job
@@ -948,39 +948,39 @@ For each task:
    - Use bash_docker for all commands
    - Handle errors gracefully - don't repeat failing operations
    - **File Operation Workflow:**
-     - New file → Write directly
-     - Existing file to modify → Read → Edit
-     - Existing file to replace → Write directly (overwrites)
+     - New file -> Write directly
+     - Existing file to modify -> Read -> Edit
+     - Existing file to replace -> Write directly (overwrites)
 
 3. **Restart servers if backend changed (see preamble for mode-specific commands):**
    - Docker: Use `lsof -ti:3001 | xargs -r kill -9` then restart (SAFE - kills by port, not pattern)
    - Local: Use `lsof -ti:3001 | xargs kill -9` (targeted, doesn't kill Web UI)
 
-4. **🚨 SMART VERIFICATION: Choose the right testing approach for each task type:**
+4. **[!] SMART VERIFICATION: Choose the right testing approach for each task type:**
 
-   **📋 DETERMINE TASK TYPE FIRST:**
+   **## DETERMINE TASK TYPE FIRST:**
    Look at the task title and description to categorize it:
 
    **UI Tasks** (contains: "UI", "component", "page", "form", "button", "display", "layout", "style"):
-   → Use **BROWSER TESTING** (Playwright required)
+   -> Use **BROWSER TESTING** (Playwright required)
 
    **API Tasks** (contains: "API", "endpoint", "route", "middleware", "server", "REST", "GraphQL"):
-   → Use **API TESTING** (curl/fetch verification)
+   -> Use **API TESTING** (curl/fetch verification)
 
    **Config Tasks** (contains: "config", "setup", "TypeScript", "build", "package", "dependencies"):
-   → Use **BUILD VERIFICATION** (compile/lint checks)
+   -> Use **BUILD VERIFICATION** (compile/lint checks)
 
    **Database Tasks** (contains: "database", "schema", "table", "migration", "model", "query"):
-   → Use **DATABASE TESTING** (SQL queries)
+   -> Use **DATABASE TESTING** (SQL queries)
 
    **Integration Tasks** (contains: "workflow", "end-to-end", "user journey", "full stack"):
-   → Use **FULL E2E TESTING** (Complete browser workflow)
+   -> Use **FULL E2E TESTING** (Complete browser workflow)
 
    **[!] VERIFICATION CHECKPOINT - CHOOSE YOUR PATH:**
 
-   ### Option A: UI TASKS → Browser WORKFLOW Testing (Playwright with Interactions)
+   ### Option A: UI TASKS -> Browser WORKFLOW Testing (Playwright with Interactions)
 
-   **🚨 CRITICAL: UI verification is NOT just taking a screenshot!**
+   **[!] CRITICAL: UI verification is NOT just taking a screenshot!**
 
    **What proper UI verification requires:**
    1. [OK] Console error monitoring (set up BEFORE navigation)
@@ -1004,7 +1004,7 @@ For each task:
   });
   const page = await browser.newPage();
 
-  // 🚨 STEP 1: Set up console error monitoring BEFORE any navigation
+  // [!] STEP 1: Set up console error monitoring BEFORE any navigation
   const consoleErrors = [];
   const consoleWarnings = [];
   page.on('console', msg => {
@@ -1013,10 +1013,10 @@ For each task:
   });
   page.on('pageerror', err => consoleErrors.push(err.message));
 
-  // 🚨 STEP 2: Navigate to the page
+  // [!] STEP 2: Navigate to the page
   await page.goto('http://localhost:5173');
 
-  // 🚨 STEP 3: TEST USER INTERACTIONS - This is what makes it a WORKFLOW test!
+  // [!] STEP 3: TEST USER INTERACTIONS - This is what makes it a WORKFLOW test!
   // Examples of interaction testing (adapt to your specific task):
 
   // For a button task:
@@ -1040,10 +1040,10 @@ For each task:
   // const isVisible = await element.isVisible();
   // if (!isVisible) throw new Error('Component not visible');
 
-  // 🚨 STEP 4: Verify expected results
+  // [!] STEP 4: Verify expected results
   // Add assertions here based on what the task should accomplish
 
-  // 🚨 STEP 5: Check console errors (MANDATORY)
+  // [!] STEP 5: Check console errors (MANDATORY)
   if (consoleErrors.length > 0) {
     console.error('[X] Console errors detected:');
     consoleErrors.forEach(err => console.error('  -', err));
@@ -1051,7 +1051,7 @@ For each task:
     process.exit(1);
   }
 
-  // 🚨 STEP 6: Take screenshot AFTER workflow is verified
+  // [!] STEP 6: Take screenshot AFTER workflow is verified
   await page.screenshot({ path: '.playwright-mcp/task_${TASK_ID}_verified.png' });
 
   console.log(JSON.stringify({
@@ -1089,7 +1089,7 @@ For each task:
    await page.screenshot({ path: '.playwright-mcp/task_123_add_item_workflow.png' });
    ```
 
-   ### Option B: API TASKS → API Testing (curl/fetch)
+   ### Option B: API TASKS -> API Testing (curl/fetch)
    ```javascript
    // For backend endpoints, REST APIs, GraphQL, middleware
    // NO BROWSER NEEDED - Test directly with curl
@@ -1119,7 +1119,7 @@ For each task:
    })
    ```
 
-   ### Option C: CONFIG TASKS → Build Verification
+   ### Option C: CONFIG TASKS -> Build Verification
    ```javascript
    // For TypeScript config, build setup, dependencies, tooling
    // NO BROWSER NEEDED - Verify compilation and configuration
@@ -1143,7 +1143,7 @@ For each task:
    })
    ```
 
-   ### Option D: DATABASE TASKS → Database Testing
+   ### Option D: DATABASE TASKS -> Database Testing
    ```javascript
    // For schema creation, migrations, models, queries
    // NO BROWSER NEEDED - Test with SQL queries
@@ -1167,7 +1167,7 @@ For each task:
    })
    ```
 
-   ### Option E: INTEGRATION TASKS → Full E2E Testing
+   ### Option E: INTEGRATION TASKS -> Full E2E Testing
    ```javascript
    // For complete workflows, multi-step user journeys
    // FULL BROWSER TESTING with multiple interactions
@@ -1215,7 +1215,7 @@ For each task:
    If you get `ERR_CONNECTION_REFUSED`, `ERR_CONNECTION_RESET`, or `ERR_EMPTY_RESPONSE`:
 
    ```
-   ATTEMPT 1 FAILED → Try once more
+   ATTEMPT 1 FAILED -> Try once more
 
    1. Check server status and logs:
       bash_docker({ command: "curl -s http://localhost:5173 > /dev/null && echo 'UP' || echo 'DOWN'" })
@@ -1228,7 +1228,7 @@ For each task:
    3. ATTEMPT 2: Retry verification
       [Run test again]
 
-   ATTEMPT 2 FAILED → STOP! Read logs before any third attempt
+   ATTEMPT 2 FAILED -> STOP! Read logs before any third attempt
 
    4. MANDATORY: Read server and web logs:
       bash_docker({ command: "tail -100 server.log" })
@@ -1240,7 +1240,7 @@ For each task:
 
    7. Only then: ATTEMPT 3 (final)
 
-   ATTEMPT 3 FAILED → Document as BLOCKER:
+   ATTEMPT 3 FAILED -> Document as BLOCKER:
 
    8. Update claude-progress.md with BLOCKER section (see format above)
    9. Do NOT mark tests as passing
@@ -1456,16 +1456,16 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **Keep it concise - update `claude-progress.md` ONLY:**
 
 ```markdown
-## 📊 Current Status
+## ## Current Status
 <Use mcp__task-manager__task_status for numbers>
 Progress: X/Y tasks (Z%)
 Completed Epics: A/B
 Current Epic: #N - Name
 
-## 🎯 Known Issues & Blockers
+## * Known Issues & Blockers
 - <Only ACTIVE issues affecting next session>
 
-## 📝 Recent Sessions
+## ## Recent Sessions
 ### Session N (date) - One-line summary
 **Completed:** Tasks #X-Y from Epic #N (or "Epic #N complete")
 **Key Changes:**
@@ -1699,7 +1699,7 @@ mcp__task-manager__bash_docker({ command: "rm -f /tmp/form_test.js" })
 - Cause: Server not fully started yet
 - Fix: Use health check loop (dynamic waiting)
 - Verify: `curl -s http://localhost:5173` before Playwright navigation
-- **🚨 MANDATORY:** If you get this error during verification:
+- **[!] MANDATORY:** If you get this error during verification:
   1. Do NOT skip verification
   2. Do NOT mark tests as passing
   3. Follow the 3-attempt retry protocol in STEP 6
