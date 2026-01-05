@@ -32,7 +32,7 @@ None
 - Epic 94 Self-Learning System: COMPLETE [OK]
 - Started Epic 95 Cost Optimization & Model Selection
 **Git Commits:** e1fcf30, e178fa1, 891617b
-**Progress:** 54→57 tasks (67.5%→71.3%), 5→6 epics complete
+**Progress:** 54->57 tasks (67.5%->71.3%), 5->6 epics complete
 
 ## ## Recent Sessions
 
@@ -186,7 +186,7 @@ None
   - Creates worktrees per epic (reuses if exists)
   - Uses asyncio.gather() with return_exceptions=True
   - Respects max_concurrency via semaphore
-  - Updates batch status in database (pending→running→completed/failed)
+  - Updates batch status in database (pending->running->completed/failed)
   - Handles partial failures gracefully
 - Task 889: Individual task agent execution
   - Loads domain expertise via ExpertiseManager.classify_domain()
@@ -279,7 +279,7 @@ None
   - Mermaid flowcharts, ASCII diagrams, critical path analysis
   - Epic and batch filtering support
 - Updated Session 0 prompts with dependency declaration instructions
-  - Common patterns documented (schema→API→UI)
+  - Common patterns documented (schema->API->UI)
   - Examples with explicit depends_on usage
 - Created dependency parsing module with inference heuristics
   - Keyword detection (requires, depends on, after, uses, needs)
