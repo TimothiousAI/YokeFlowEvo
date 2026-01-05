@@ -1405,6 +1405,12 @@ class WorktreeManager:
         Sanitize epic name to create valid git branch name.
         Windows-safe: handles reserved names and special characters.
 
+        Windows-specific handling:
+        - Reserved names: CON, PRN, AUX, NUL, COM1-9, LPT1-9
+        - Invalid characters: : * ? " < > | \\ /
+        - Trailing dots and spaces
+        - Path length limits (200 chars for branch name)
+
         Args:
             name: Epic name to sanitize
 
@@ -1419,27 +1425,32 @@ class WorktreeManager:
         # Replace spaces and underscores with hyphens
         branch = branch.replace(' ', '-').replace('_', '-')
 
-        # Remove invalid characters (keep alphanumeric, hyphens, dots)
+        # Remove Windows invalid characters: : * ? " < > | \ /
+        # Also remove any other special characters except alphanumeric, hyphens, dots
+        # Keep only: a-z, 0-9, hyphens, dots
         branch = re.sub(r'[^a-z0-9\-.]', '', branch)
 
         # Replace multiple consecutive hyphens with single hyphen
         branch = re.sub(r'-+', '-', branch)
 
-        # Remove leading/trailing hyphens and dots
-        branch = branch.strip('-.')
+        # Remove leading/trailing hyphens, dots, and spaces
+        branch = branch.strip('-. ')
 
         # Handle Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+        # Check the base name (before any extension-like suffix)
+        base_name = branch.split('.')[0] if '.' in branch else branch
         reserved_names = ['con', 'prn', 'aux', 'nul']
         reserved_names += [f'com{i}' for i in range(1, 10)]
         reserved_names += [f'lpt{i}' for i in range(1, 10)]
 
-        if branch in reserved_names:
+        if base_name in reserved_names or branch in reserved_names:
             branch = f'epic-{branch}'
 
-        # Limit length (git branch names should be reasonable)
-        max_length = 100
+        # Enforce max path length (200 chars for branch name to stay well under Windows MAX_PATH)
+        # This leaves room for the full worktree path
+        max_length = 200
         if len(branch) > max_length:
-            branch = branch[:max_length].rstrip('-.')
+            branch = branch[:max_length].rstrip('-. ')
 
         # Ensure non-empty
         if not branch:
