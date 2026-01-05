@@ -377,13 +377,16 @@ class AgentOrchestrator:
         coding_model: Optional[str] = None,
         max_iterations: Optional[int] = 0,  # 0 = unlimited by default
         progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        parallel: bool = False,
+        max_concurrency: int = 3,
     ) -> SessionInfo:
         """
         Run coding sessions (Session 2+) for a project.
 
         This method:
         - Verifies initialization is complete
-        - Runs multiple sessions with auto-continue
+        - Runs multiple sessions with auto-continue (sequential mode)
+        - OR runs tasks in parallel batches (parallel mode)
         - Respects max_iterations setting (0/None = unlimited)
         - Respects stop_after_current flag
 
@@ -392,6 +395,8 @@ class AgentOrchestrator:
             coding_model: Model to use (defaults to config.models.coding)
             max_iterations: Maximum sessions to run (0 or None = unlimited)
             progress_callback: Optional async callback for real-time progress updates
+            parallel: If True, use ParallelExecutor for concurrent task execution (default: False)
+            max_concurrency: Maximum concurrent agents when parallel=True (default: 3, range: 1-10)
 
         Returns:
             SessionInfo for the LAST completed session
@@ -420,6 +425,70 @@ class AgentOrchestrator:
         if max_iterations is None or max_iterations == 0:
             max_iterations = None  # Unlimited
 
+        # PARALLEL EXECUTION MODE
+        # If parallel=True, use ParallelExecutor instead of sequential loop
+        if parallel:
+            logger.info(f"Starting parallel execution mode (max_concurrency={max_concurrency})")
+
+            try:
+                from core.parallel.parallel_executor import ParallelExecutor
+
+                # Get project path from database
+                async with DatabaseManager() as db:
+                    project = await db.get_project(project_id)
+                    if not project or not project.get('local_path'):
+                        raise ValueError("Project local_path not found in database")
+
+                    project_path = project.get('local_path')
+
+                # Create ParallelExecutor
+                executor = ParallelExecutor(
+                    project_path=project_path,
+                    project_id=str(project_id),
+                    max_concurrency=max_concurrency,
+                    progress_callback=progress_callback,
+                    db_connection=None  # Executor will create its own DB connections
+                )
+
+                # Execute all tasks in parallel batches
+                results = await executor.execute()
+
+                # Log results
+                successful = sum(1 for r in results if r.success)
+                total = len(results)
+                logger.info(f"Parallel execution complete: {successful}/{total} tasks successful")
+
+                # Return a SessionInfo-like object for the parallel execution
+                # Note: This is a simplified representation since parallel execution
+                # doesn't have a single session ID
+                return SessionInfo(
+                    session_id=None,  # No single session ID for parallel execution
+                    project_id=project_id,
+                    status=SessionStatus.COMPLETED if successful == total else SessionStatus.ERROR,
+                    session_number=0,  # Not applicable for parallel
+                    session_type=SessionType.CODING,
+                    model=coding_model,
+                    started_at=datetime.now(),
+                    completed_at=datetime.now(),
+                    error_message=None if successful == total else f"{total - successful} tasks failed"
+                )
+
+            except Exception as e:
+                logger.error(f"Parallel execution failed: {e}", exc_info=True)
+                # Return error session info
+                return SessionInfo(
+                    session_id=None,
+                    project_id=project_id,
+                    status=SessionStatus.ERROR,
+                    session_number=0,
+                    session_type=SessionType.CODING,
+                    model=coding_model,
+                    started_at=datetime.now(),
+                    completed_at=datetime.now(),
+                    error_message=str(e)
+                )
+
+        # SEQUENTIAL EXECUTION MODE (default, backward compatible)
         # Auto-continue loop for coding sessions
         iteration = 0
         last_session = None
