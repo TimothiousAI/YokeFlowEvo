@@ -1,0 +1,34 @@
+domain: database
+overview: "PostgreSQL with asyncpg connection pooling. UUID primary keys, JSONB for metadata, async/await throughout."
+
+core_files:
+  - core/database.py
+  - core/database_connection.py
+  - schema/postgresql/schema.sql
+  - mcp-task-manager/src/database.ts
+
+patterns:
+  - "Always use UUID for primary keys (gen_random_uuid())"
+  - "JSONB for flexible metadata fields"
+  - "ON DELETE CASCADE for child tables (epics->tasks->tests)"
+  - "Use async with db.acquire() for connection management"
+  - "Connection pool: min_size=10, max_size=20"
+  - "3-tier hierarchy: projects -> epics -> tasks -> tests"
+
+best_practices:
+  - "Run schema changes idempotently (IF NOT EXISTS)"
+  - "Add indexes for foreign keys and common query patterns"
+  - "Use views for complex aggregations (v_next_task, v_progress)"
+  - "Session status enum: pending, running, completed, error"
+  - "Task completion triggers epic completion check"
+
+learned_from_failures:
+  - issue: "Connection pool exhaustion"
+    solution: "Ensure connections released with async with pattern"
+  - issue: "Race condition on task status"
+    solution: "Use FOR UPDATE row locking for concurrent updates"
+
+effective_patterns:
+  - "Read schema.sql -> understand structure -> modify database.py"
+  - "Check existing views before creating new aggregation logic"
+  - "TypeScript MCP server uses pg Pool, Python uses asyncpg"

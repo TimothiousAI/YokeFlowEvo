@@ -95,6 +95,7 @@ class AgentOrchestrator:
         sandbox_type: str = "docker",
         initializer_model: Optional[str] = None,
         coding_model: Optional[str] = None,
+        local_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new project from a specification.
@@ -108,6 +109,8 @@ class AgentOrchestrator:
             sandbox_type: Sandbox type (docker or local), default: docker
             initializer_model: Model for initialization session (optional)
             coding_model: Model for coding sessions (optional)
+            local_path: Custom path for enhancement mode (optional)
+                        If provided, uses existing directory instead of generations/
 
         Returns:
             Dict with project info: {"project_id": UUID, "name": str, ...}
@@ -145,17 +148,26 @@ class AgentOrchestrator:
                         for f in sorted(spec_files)
                     )
 
-            # Create project directory in generations
-            generations_dir = Path(self.config.project.default_generations_dir)
-            project_path = generations_dir / project_name
-            project_path.mkdir(parents=True, exist_ok=True)
+            # Determine project path - enhancement mode vs greenfield mode
+            if local_path:
+                # Enhancement mode: use existing directory (e.g., git worktree)
+                project_path = Path(local_path)
+                if not project_path.exists():
+                    raise ValueError(f"Enhancement mode requires existing directory: {local_path}")
+                # In enhancement mode, spec file should already be in place (app_spec.txt)
+                # Don't overwrite existing files
+            else:
+                # Greenfield mode: create new project in generations/
+                generations_dir = Path(self.config.project.default_generations_dir)
+                project_path = generations_dir / project_name
+                project_path.mkdir(parents=True, exist_ok=True)
 
-            # Copy spec files to project directory if source provided
-            if spec_source:
-                copy_spec_to_project(project_path, spec_source)
-            elif spec_content:
-                # Write spec_content to app_spec.txt if no source file provided
-                (project_path / "app_spec.txt").write_text(spec_content, encoding='utf-8')
+                # Copy spec files to project directory if source provided
+                if spec_source:
+                    copy_spec_to_project(project_path, spec_source)
+                elif spec_content:
+                    # Write spec_content to app_spec.txt if no source file provided
+                    (project_path / "app_spec.txt").write_text(spec_content, encoding='utf-8')
 
             # Create project in database
             project = await db.create_project(
@@ -201,10 +213,16 @@ class AgentOrchestrator:
             if not project:
                 raise ValueError(f"Project not found: {project_id}")
 
-            # Compute local_path from project name
-            generations_dir = Path(self.config.project.default_generations_dir)
-            project_path = generations_dir / project['name']
-            project['local_path'] = str(project_path)
+            # Use stored local_path if available, otherwise compute default
+            # This enables "enhancement mode" where projects can target existing codebases
+            stored_local_path = project.get('local_path', '')
+            if stored_local_path:
+                project_path = Path(stored_local_path)
+            else:
+                # Default: use generations/<project_name>
+                generations_dir = Path(self.config.project.default_generations_dir)
+                project_path = generations_dir / project['name']
+                project['local_path'] = str(project_path)
 
             # Get progress statistics
             progress = await db.get_progress(project_id)

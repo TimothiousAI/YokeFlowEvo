@@ -432,6 +432,7 @@ core/
 
 | Epic | Name | Priority | Phase | Dependencies |
 |------|------|----------|-------|--------------|
+| 00 | Core Refinements | P0 | 0 | None |
 | 01 | Foundation Infrastructure | P0 | 1 | None |
 | 02 | Dependency Resolution | P0 | 1 | Epic 01 |
 | 03 | Git Worktree Isolation | P0 | 1 | Epic 01 |
@@ -443,6 +444,7 @@ core/
 
 ### Epic Summaries
 
+0. **Epic 00: Core Refinements** - .gitignore handling, post-session validation, export documentation (quick wins from real-world usage)
 1. **Epic 01: Foundation Infrastructure** - Database schema, configuration, module structure
 2. **Epic 02: Dependency Resolution** - Kahn's algorithm, dependency parsing, batch computation
 3. **Epic 03: Git Worktree Isolation** - WorktreeManager, merge handling, conflict resolution
@@ -458,6 +460,7 @@ core/
 
 | Phase | Epics | Deliverables |
 |-------|-------|--------------|
+| Phase 0: Quick Wins | 00 | .gitignore fixes, validation, export docs (can be done immediately) |
 | Phase 1: Core Infrastructure | 01, 02, 03, 04 | Schema, dependency resolution, worktrees, parallel executor |
 | Phase 2: Intelligence Layer | 05, 06 | Self-learning, cost optimization |
 | Phase 3: User Experience | 07 | Swimlane UI, dashboards, real-time updates |

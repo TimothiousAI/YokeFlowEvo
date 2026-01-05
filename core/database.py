@@ -154,9 +154,15 @@ class TaskDatabase:
             project = dict(row)
 
             # Extract local_path from metadata JSONB if present
-            if project.get('metadata') and isinstance(project['metadata'], dict):
-                if 'local_path' in project['metadata']:
-                    project['local_path'] = project['metadata']['local_path']
+            # Handle both dict and JSON string formats
+            metadata = project.get('metadata')
+            if metadata:
+                if isinstance(metadata, str):
+                    import json
+                    metadata = json.loads(metadata)
+                    project['metadata'] = metadata
+                if isinstance(metadata, dict) and 'local_path' in metadata:
+                    project['local_path'] = metadata['local_path']
 
             return project
 

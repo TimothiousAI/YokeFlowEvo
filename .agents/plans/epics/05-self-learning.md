@@ -722,3 +722,25 @@ class TestExpertiseManager:
 - Consider pre-seeding expertise from YokeFlow's own patterns
 - May need to handle very large projects differently
 - Expertise validation could be enhanced with AST analysis
+
+---
+
+## Research Findings (ADWS Comparison)
+
+**Analysis of Orchestrator-ADWS reference implementation revealed:**
+
+| Our Plan | ADWS Reality |
+|----------|--------------|
+| Log parsing for learnings | Real-time API event capture |
+| 1000-line limit | No limit - unbounded growth |
+| Deduplication of learnings | Append-only, no dedup |
+| Conflict resolution | Contradictions ignored |
+
+**Validation:** Our design is **MORE robust** than ADWS. Key advantages:
+
+1. **1000-line cap** - Forces concise, high-value knowledge (ADWS has unbounded files)
+2. **Deduplication** - Prevents redundant entries (ADWS appends duplicates)
+3. **Log parsing** - Works post-session without requiring real-time hooks
+4. **Validation cycle** - Removes stale entries (ADWS doesn't validate)
+
+**Recommendation:** Keep our planned approach - it addresses gaps in the ADWS implementation.

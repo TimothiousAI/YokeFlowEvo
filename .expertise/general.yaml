@@ -1,0 +1,44 @@
+domain: general
+overview: "YokeFlow autonomous coding platform. Opus for planning (Session 0), Sonnet for coding (Sessions 1+). MCP protocol for task management."
+
+core_files:
+  - core/orchestrator.py
+  - core/agent.py
+  - core/client.py
+  - core/config.py
+  - CLAUDE.md
+
+patterns:
+  - "Session 0 = initialization (roadmap creation)"
+  - "Sessions 1+ = coding (task implementation)"
+  - "MCP tools prefixed mcp__task-manager__"
+  - "Dual logging: JSONL (machine) + TXT (human)"
+  - "Docker sandbox for isolation, local mode for development"
+
+best_practices:
+  - "Read CLAUDE.md for project conventions"
+  - "Check core/config.py for configuration options"
+  - "Use existing prompts in prompts/ directory as templates"
+  - "Browser verification with Playwright for web projects"
+  - "Blocklist security in core/security.py"
+
+learned_from_failures:
+  - issue: "venv/node_modules committed to git"
+    solution: "Ensure .gitignore before dependency installation"
+  - issue: "Session type enum mismatch"
+    solution: "Use 'coding' not 'test_completion' for database enum"
+
+effective_patterns:
+  - "Read orchestrator.py for session lifecycle"
+  - "Read agent.py for agent loop implementation"
+  - "Check prompts/ for agent instructions"
+  - "Test with --verbose flag for debugging"
+
+project_structure:
+  - "core/ - Core platform modules"
+  - "api/ - FastAPI REST API"
+  - "web-ui/ - Next.js frontend"
+  - "mcp-task-manager/ - TypeScript MCP server"
+  - "prompts/ - Agent instruction templates"
+  - "schema/ - Database DDL"
+  - "generations/ - Generated project outputs"

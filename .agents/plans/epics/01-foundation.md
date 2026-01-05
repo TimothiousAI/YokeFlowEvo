@@ -344,8 +344,79 @@ __all__ = ['DependencyResolver', 'WorktreeManager', 'ParallelExecutor']
 
 ---
 
+---
+
+### 1.6 MCP Transaction Utilities (CRITICAL)
+
+**Description:** Add transaction wrapper utilities to support concurrent MCP operations.
+
+**Background (Research Finding):** The MCP task-manager has NO transaction isolation - concurrent agents can cause race conditions on task/epic status updates. This MUST be addressed before enabling parallel execution.
+
+**File:** `mcp-task-manager/src/database.ts`
+
+**Required Changes:**
+
+```typescript
+// Add transaction wrapper
+async transaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await fn(client);
+        await client.query('COMMIT');
+        return result;
+    } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+    } finally {
+        client.release();
+    }
+}
+
+// Add row-level locking for task updates
+async updateTaskStatusSafe(taskId: string, done: boolean): Promise<Task | null> {
+    return this.transaction(async (client) => {
+        // Lock the row first
+        const locked = await client.query(
+            'SELECT * FROM tasks WHERE id = $1 AND project_id = $2 FOR UPDATE',
+            [taskId, this.projectId]
+        );
+
+        if (locked.rows.length === 0) return null;
+
+        // Validate tests if marking complete
+        if (done) {
+            const tests = await client.query(
+                'SELECT * FROM tests WHERE task_id = $1 AND passed = false',
+                [taskId]
+            );
+            if (tests.rows.length > 0) {
+                throw new Error('Cannot complete task: failing tests');
+            }
+        }
+
+        // Update with lock held
+        await client.query(
+            'UPDATE tasks SET done = $1, completed_at = $2 WHERE id = $3',
+            [done, done ? new Date() : null, taskId]
+        );
+
+        return locked.rows[0];
+    });
+}
+```
+
+**Acceptance Criteria:**
+- [ ] Transaction wrapper implemented
+- [ ] Row-level locking with FOR UPDATE
+- [ ] Epic completion check is atomic
+- [ ] Concurrent updates don't cause race conditions
+
+---
+
 ## Notes
 
 - All schema changes should be idempotent (can run multiple times)
 - Consider adding migration version tracking
 - Keep existing schema.sql intact, add parallel_execution.sql separately
+- **CRITICAL**: Task 1.6 (MCP Transaction Utilities) is a prerequisite for Epic 04 (Parallel Executor) - without it, concurrent agents will cause data corruption
