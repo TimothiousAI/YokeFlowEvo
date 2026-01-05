@@ -187,6 +187,78 @@ def test_priority_ordering():
     print("[PASS]")
 
 
+def test_epic_level_dependencies():
+    """Test epic-level dependencies where all tasks from epic A must complete before epic B starts"""
+    print("\n=== Test 8: Epic-Level Dependencies ===")
+
+    # Epic 1: tasks 1, 2 (no dependencies)
+    # Epic 2: tasks 3, 4 (depends on epic 1 completing)
+    # This simulates epic-level dependencies by having tasks 3 and 4 both depend on tasks 1 and 2
+    tasks = [
+        {'id': 1, 'epic_id': 1, 'priority': 1, 'depends_on': []},
+        {'id': 2, 'epic_id': 1, 'priority': 2, 'depends_on': []},
+        {'id': 3, 'epic_id': 2, 'priority': 1, 'depends_on': [1, 2], 'dependency_type': 'hard'},
+        {'id': 4, 'epic_id': 2, 'priority': 2, 'depends_on': [1, 2], 'dependency_type': 'hard'},
+    ]
+
+    resolver = DependencyResolver()
+    graph = resolver.resolve(tasks)
+
+    print(f"Batches: {graph.batches}")
+    print(f"Task order: {graph.task_order}")
+
+    # Should have 2 batches: [1,2] then [3,4]
+    assert len(graph.batches) == 2, f"Expected 2 batches, got {len(graph.batches)}"
+    assert set(graph.batches[0]) == {1, 2}, f"Expected batch 0 = {{1,2}}, got {graph.batches[0]}"
+    assert set(graph.batches[1]) == {3, 4}, f"Expected batch 1 = {{3,4}}, got {graph.batches[1]}"
+
+    # Verify task order includes all tasks
+    assert len(graph.task_order) == 4, f"Expected 4 tasks in order, got {len(graph.task_order)}"
+
+    print("[PASS]")
+
+
+def test_complex_epic_dependencies():
+    """Test complex scenario with multiple epics and mixed dependencies"""
+    print("\n=== Test 9: Complex Epic Dependencies ===")
+
+    # Epic 1: tasks 1, 2 (foundation)
+    # Epic 2: tasks 3, 4 (depends on Epic 1)
+    # Epic 3: task 5 (depends on Epic 2)
+    # Epic 4: task 6 (independent, can run with Epic 1)
+    tasks = [
+        {'id': 1, 'epic_id': 1, 'priority': 1, 'depends_on': []},
+        {'id': 2, 'epic_id': 1, 'priority': 2, 'depends_on': []},
+        {'id': 3, 'epic_id': 2, 'priority': 1, 'depends_on': [1, 2], 'dependency_type': 'hard'},
+        {'id': 4, 'epic_id': 2, 'priority': 2, 'depends_on': [1, 2], 'dependency_type': 'hard'},
+        {'id': 5, 'epic_id': 3, 'priority': 1, 'depends_on': [3, 4], 'dependency_type': 'hard'},
+        {'id': 6, 'epic_id': 4, 'priority': 1, 'depends_on': []},  # Independent
+    ]
+
+    resolver = DependencyResolver()
+    graph = resolver.resolve(tasks)
+
+    print(f"Batches: {graph.batches}")
+    print(f"Task order: {graph.task_order}")
+
+    # Should have 3 batches: [1,2,6], [3,4], [5]
+    assert len(graph.batches) == 3, f"Expected 3 batches, got {len(graph.batches)}"
+
+    # Batch 0: tasks from Epic 1 and independent Epic 4
+    assert 1 in graph.batches[0], "Task 1 should be in batch 0"
+    assert 2 in graph.batches[0], "Task 2 should be in batch 0"
+    assert 6 in graph.batches[0], "Task 6 (independent) should be in batch 0"
+
+    # Batch 1: tasks from Epic 2
+    assert 3 in graph.batches[1], "Task 3 should be in batch 1"
+    assert 4 in graph.batches[1], "Task 4 should be in batch 1"
+
+    # Batch 2: task from Epic 3
+    assert 5 in graph.batches[2], "Task 5 should be in batch 2"
+
+    print("[PASS]")
+
+
 def run_all_tests():
     """Run all tests"""
     print("\n" + "="*60)
@@ -201,9 +273,11 @@ def run_all_tests():
         test_missing_dependency()
         test_soft_dependencies()
         test_priority_ordering()
+        test_epic_level_dependencies()
+        test_complex_epic_dependencies()
 
         print("\n" + "="*60)
-        print("[SUCCESS] ALL TESTS PASSED")
+        print("[SUCCESS] ALL TESTS PASSED (9/9)")
         print("="*60)
         return True
 
