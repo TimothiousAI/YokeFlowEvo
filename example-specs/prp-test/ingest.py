@@ -414,7 +414,7 @@ async def main():
         
         # Print individual results
         for result in results:
-            status = "✓" if not result.errors else "✗"
+            status = "[OK]" if not result.errors else "✗"
             print(f"{status} {result.title}: {result.chunks_created} chunks")
             
             if result.errors:

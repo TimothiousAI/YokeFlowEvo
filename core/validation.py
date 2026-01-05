@@ -361,10 +361,10 @@ def run_validation(project_path: Path, auto_fix: bool = True) -> Dict[str, Any]:
 
     # Log summary
     if report["total_issues"] == 0:
-        logger.info("✅ Repository validation passed with no issues")
+        logger.info("[OK] Repository validation passed with no issues")
     else:
         logger.warning(
-            f"⚠️  Repository validation found {report['total_issues']} issues "
+            f"[!] Repository validation found {report['total_issues']} issues "
             f"({report['errors']} errors, {report['warnings']} warnings)"
         )
 

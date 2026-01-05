@@ -97,7 +97,7 @@ async def cleanup_containers(stopped_only: bool = False, force: bool = False, al
     containers = await list_containers()
 
     if not containers:
-        print("✓ No yokeflow containers found.\n")
+        print("[OK] No yokeflow containers found.\n")
         return 0
 
     print(f"Found {len(containers)} container(s):\n")
@@ -152,9 +152,9 @@ async def cleanup_containers(stopped_only: bool = False, force: bool = False, al
             to_remove.append((name, f"no project '{project_name}' in database"))
 
     if not to_remove:
-        print("✓ No containers to remove.\n")
+        print("[OK] No containers to remove.\n")
         if not stopped_only and not force:
-            print("💡 All containers belong to active projects")
+            print("* All containers belong to active projects")
             print("   Use --stopped to remove stopped containers")
             print("   Use --force to remove all containers\n")
         return 0
@@ -172,7 +172,7 @@ async def cleanup_containers(stopped_only: bool = False, force: bool = False, al
             print("\nCancelled.")
             return 0
     elif force:
-        confirmation = input("⚠️  Force mode - this will remove running containers. Continue? (yes/no): ")
+        confirmation = input("[!]  Force mode - this will remove running containers. Continue? (yes/no): ")
         if confirmation.lower() != 'yes':
             print("\nCancelled.")
             return 0
@@ -185,13 +185,13 @@ async def cleanup_containers(stopped_only: bool = False, force: bool = False, al
     for name, reason in to_remove:
         success = await remove_container(name, force=True)
         if success:
-            print(f"✓ Removed: {name}")
+            print(f"[OK] Removed: {name}")
             removed += 1
         else:
             print(f"✗ Failed: {name}")
             failed += 1
 
-    print(f"\n✓ Removed {removed} container(s)")
+    print(f"\n[OK] Removed {removed} container(s)")
     if failed > 0:
         print(f"✗ Failed to remove {failed} container(s)")
 

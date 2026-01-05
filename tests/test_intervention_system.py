@@ -35,26 +35,26 @@ async def test_retry_tracker():
     tool_input = {"command": "npm install"}
     is_blocked, reason = tracker.track_command("Bash", tool_input)
     assert not is_blocked, "First attempt should not be blocked"
-    print("✅ First attempt: PASS")
+    print("[OK] First attempt: PASS")
 
     # Second attempt
     is_blocked, reason = tracker.track_command("Bash", tool_input)
     assert not is_blocked, "Second attempt should not be blocked"
-    print("✅ Second attempt: PASS")
+    print("[OK] Second attempt: PASS")
 
     # Third attempt (should block)
     is_blocked, reason = tracker.track_command("Bash", tool_input)
     assert is_blocked, "Third attempt should be blocked"
     assert "3 times" in reason
-    print(f"✅ Third attempt blocked: {reason}")
+    print(f"[OK] Third attempt blocked: {reason}")
 
     # Test with different command
     tool_input2 = {"command": "npm start"}
     is_blocked, reason = tracker.track_command("Bash", tool_input2)
     assert not is_blocked, "Different command should not be blocked"
-    print("✅ Different command: PASS")
+    print("[OK] Different command: PASS")
 
-    print("\n✅ Retry Tracker tests passed!")
+    print("\n[OK] Retry Tracker tests passed!")
 
 
 async def test_critical_error_detector():
@@ -70,22 +70,22 @@ async def test_critical_error_detector():
     is_critical, blocker_info = detector.check_for_blocker(error_text)
     assert is_critical, "Port conflict should be detected"
     assert blocker_info["type"] == "address_in_use"
-    print(f"✅ Port conflict detected: {blocker_info['type']}")
+    print(f"[OK] Port conflict detected: {blocker_info['type']}")
 
     # Test Redis error
     error_text = "Error: connect ECONNREFUSED 127.0.0.1:6379"
     is_critical, blocker_info = detector.check_for_blocker(error_text)
     assert is_critical, "Redis error should be detected"
     assert blocker_info["type"] == "redis_connection_refused"
-    print(f"✅ Redis error detected: {blocker_info['type']}")
+    print(f"[OK] Redis error detected: {blocker_info['type']}")
 
     # Test non-critical error
     error_text = "Warning: deprecated package version"
     is_critical, blocker_info = detector.check_for_blocker(error_text)
     assert not is_critical, "Warning should not be critical"
-    print("✅ Non-critical error: PASS")
+    print("[OK] Non-critical error: PASS")
 
-    print("\n✅ Critical Error Detector tests passed!")
+    print("\n[OK] Critical Error Detector tests passed!")
 
 
 async def test_intervention_manager():
@@ -108,7 +108,7 @@ async def test_intervention_manager():
     # Test normal tool use
     is_blocked, reason = await manager.check_tool_use("Read", {"file_path": "/test.txt"})
     assert not is_blocked
-    print("✅ Normal tool use: PASS")
+    print("[OK] Normal tool use: PASS")
 
     # Test retry limit
     bash_input = {"command": "failing-command"}
@@ -119,7 +119,7 @@ async def test_intervention_manager():
     # Third attempt should block
     is_blocked, reason = await manager.check_tool_use("Bash", bash_input)
     assert is_blocked, "Third attempt should be blocked"
-    print(f"✅ Retry limit triggered: {reason}")
+    print(f"[OK] Retry limit triggered: {reason}")
 
     # Test critical error with a fresh manager (to avoid notification_sent flag)
     manager2 = InterventionManager(config)
@@ -127,9 +127,9 @@ async def test_intervention_manager():
     result_text = "Error: listen EADDRINUSE: address already in use :::3000"
     is_blocked, reason = await manager2.check_tool_error(result_text)
     assert is_blocked, "Critical error should block"
-    print(f"✅ Critical error detected: {reason}")
+    print(f"[OK] Critical error detected: {reason}")
 
-    print("\n✅ Intervention Manager tests passed!")
+    print("\n[OK] Intervention Manager tests passed!")
 
 
 async def test_pause_resume_session():
@@ -139,7 +139,7 @@ async def test_pause_resume_session():
     print("="*50)
 
     # Skip this test - requires full database setup
-    print("⚠️  Skipping database tests (requires full PostgreSQL setup)")
+    print("[!]  Skipping database tests (requires full PostgreSQL setup)")
     print("    This test would verify:")
     print("    - Session pausing with state preservation")
     print("    - Session resuming with context")
@@ -184,12 +184,12 @@ async def test_pause_resume_session():
             current_task={"id": "task-1", "description": "Test task"},
             message_count=5
         )
-        print(f"✅ Session paused with ID: {paused_id}")
+        print(f"[OK] Session paused with ID: {paused_id}")
 
         # Test getting active pauses
         active_pauses = await manager.get_active_pauses(project_id)
         assert len(active_pauses) > 0, "Should have active pauses"
-        print(f"✅ Found {len(active_pauses)} active pause(s)")
+        print(f"[OK] Found {len(active_pauses)} active pause(s)")
 
         # Test resuming the session
         resume_context = await manager.resume_session(
@@ -198,16 +198,16 @@ async def test_pause_resume_session():
             resolution_notes="Test resolution"
         )
         assert resume_context["session_id"] == session_id
-        print("✅ Session resumed successfully")
+        print("[OK] Session resumed successfully")
 
         # Verify no more active pauses
         active_pauses = await manager.get_active_pauses(project_id)
         paused_count = sum(1 for p in active_pauses if p["id"] == paused_id)
         assert paused_count == 0, "Resumed session should not be in active pauses"
-        print("✅ Session removed from active pauses")
+        print("[OK] Session removed from active pauses")
 
     except Exception as e:
-        print(f"⚠️  Database test failed (expected in test environment): {e}")
+        print(f"[!]  Database test failed (expected in test environment): {e}")
 
     # Cleanup
     async with DatabaseManager() as db:
@@ -215,7 +215,7 @@ async def test_pause_resume_session():
         await db.execute("DELETE FROM sessions WHERE id = %s::UUID", session_id)
         await db.execute("DELETE FROM projects WHERE id = %s::UUID", project_id)
 
-    print("\n✅ Session Pause/Resume tests passed!")
+    print("\n[OK] Session Pause/Resume tests passed!")
 
 
 async def test_auto_recovery():
@@ -234,14 +234,14 @@ async def test_auto_recovery():
         {}
     )
     assert not success
-    print(f"✅ Unknown blocker handled: {message}")
+    print(f"[OK] Unknown blocker handled: {message}")
 
     # Test module installation recovery detection
     has_recovery = "module_not_found" in manager.recovery_actions
     assert has_recovery
-    print(f"✅ Module recovery action registered: {has_recovery}")
+    print(f"[OK] Module recovery action registered: {has_recovery}")
 
-    print("\n✅ Auto Recovery Manager tests passed!")
+    print("\n[OK] Auto Recovery Manager tests passed!")
 
 
 async def test_notifications():
@@ -268,15 +268,15 @@ async def test_notifications():
 
     # Should have no results since all channels are disabled
     assert len(results) == 0 or all(not v for v in results.values())
-    print("✅ Disabled notifications: PASS")
+    print("[OK] Disabled notifications: PASS")
 
     # Test rate limiting
     service.last_notification_times["test"] = datetime.now()
     is_allowed = service._check_rate_limit("test")
     assert not is_allowed, "Should be rate limited"
-    print("✅ Rate limiting: PASS")
+    print("[OK] Rate limiting: PASS")
 
-    print("\n✅ Notification System tests passed!")
+    print("\n[OK] Notification System tests passed!")
 
 
 async def main():
@@ -294,14 +294,14 @@ async def main():
         await test_notifications()
 
         print("\n" + "="*70)
-        print("✅ ALL TESTS PASSED!")
+        print("[OK] ALL TESTS PASSED!")
         print("="*70)
 
     except AssertionError as e:
-        print(f"\n❌ TEST FAILED: {e}")
+        print(f"\n[X] TEST FAILED: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"\n⚠️  UNEXPECTED ERROR: {e}")
+        print(f"\n[!]  UNEXPECTED ERROR: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

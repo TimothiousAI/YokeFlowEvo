@@ -38,7 +38,7 @@ async def test_retry_tracker():
         print(f"Attempt {i}: Blocked={is_blocked}, Reason={reason}")
 
         if is_blocked:
-            print(f"✅ Successfully detected retry loop after {i} attempts")
+            print(f"[OK] Successfully detected retry loop after {i} attempts")
             break
 
     # Test error tracking
@@ -56,7 +56,7 @@ async def test_retry_tracker():
         print(f"Error {i}: Blocked={is_blocked}")
 
         if is_blocked:
-            print(f"✅ Successfully detected repeated errors after {i} occurrences")
+            print(f"[OK] Successfully detected repeated errors after {i} occurrences")
             break
 
     # Print stats
@@ -81,7 +81,7 @@ def test_blocker_detector():
 
     for error_msg, should_block in test_errors:
         is_blocker, info = detector.check_for_blocker(error_msg)
-        status = "✅" if is_blocker == should_block else "❌"
+        status = "[OK]" if is_blocker == should_block else "[X]"
         print(f"{status} '{error_msg[:40]}...' -> Blocker: {is_blocker}")
 
         if is_blocker and info:
@@ -99,7 +99,7 @@ async def test_notification_service():
     webhook_url = os.getenv("YOKEFLOW_WEBHOOK_URL")
 
     if not webhook_url:
-        print("⚠️ No webhook URL configured. Set YOKEFLOW_WEBHOOK_URL to test notifications.")
+        print("[!] No webhook URL configured. Set YOKEFLOW_WEBHOOK_URL to test notifications.")
         print("   Example: export YOKEFLOW_WEBHOOK_URL='https://hooks.slack.com/services/...'")
         return
 
@@ -130,9 +130,9 @@ async def test_notification_service():
     )
 
     if success:
-        print(f"✅ Notification sent successfully to webhook!")
+        print(f"[OK] Notification sent successfully to webhook!")
     else:
-        print(f"❌ Failed to send notification")
+        print(f"[X] Failed to send notification")
 
 
 async def test_intervention_manager():
@@ -163,7 +163,7 @@ async def test_intervention_manager():
         print(f"Command {i}: Blocked={is_blocked}")
 
         if is_blocked:
-            print(f"✅ Manager blocked after {i} attempts: {reason}")
+            print(f"[OK] Manager blocked after {i} attempts: {reason}")
             break
 
     # Test error detection
@@ -178,7 +178,7 @@ async def test_intervention_manager():
         print(f"Error {i}: Blocked={is_blocked}")
 
         if is_blocked:
-            print(f"✅ Manager detected critical error: {reason}")
+            print(f"[OK] Manager detected critical error: {reason}")
             break
 
     # Print summary

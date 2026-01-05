@@ -43,7 +43,7 @@ async def show_overall_progress(db, project_id: UUID) -> None:
 
     # Create a nice panel with progress bars
     progress_text = f"""
-[bold cyan]📊 Overall Progress[/bold cyan]
+[bold cyan]## Overall Progress[/bold cyan]
 
 [yellow]Epics:[/yellow]    {stats['completed_epics']}/{stats['total_epics']} ({epic_progress:.1f}%)
 [green]Tasks:[/green]    {stats['completed_tasks']}/{stats['total_tasks']} ({task_progress:.1f}%)
@@ -183,7 +183,7 @@ async def show_next_task(db, project_id: UUID) -> None:
 
     # Create nice display
     task_info = f"""
-[bold cyan]📋 Next Task[/bold cyan]
+[bold cyan]## Next Task[/bold cyan]
 
 [yellow]Task ID:[/yellow] {task['id']}
 [yellow]Epic:[/yellow] {task.get('epic_name', 'Unknown')}
@@ -195,7 +195,7 @@ async def show_next_task(db, project_id: UUID) -> None:
 [cyan]Tests ({len(tests)}):[/cyan]"""
 
     for test in tests:
-        status = "✅" if test.get('passes') else "⭕"
+        status = "[OK]" if test.get('passes') else "⭕"
         task_info += f"\n  {status} [{test.get('category', 'unknown')}] {test['description']}"
 
     console.print(Panel(task_info, border_style="green"))

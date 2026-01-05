@@ -312,7 +312,7 @@ def analyze_session_logs(jsonl_path: Path) -> Dict[str, Any]:
 
 def _check_nav_screenshot_pattern(browser_events: List[Dict]) -> bool:
     """
-    Check if browser events show good Navigate → Screenshot pattern.
+    Check if browser events show good Navigate -> Screenshot pattern.
 
     A good pattern is when navigate is followed by screenshot within a reasonable time.
     """
@@ -744,7 +744,7 @@ def _create_review_context(
     context += f"  - Before task completion: {enhanced_data.get('screenshots_before_completion', 0)} ({enhanced_data.get('screenshots_before_pct', 0):.0%})\n"
     context += f"  - After task completion: {enhanced_data.get('screenshots_after_completion', 0)} ({enhanced_data.get('screenshots_after_pct', 0):.0%})\n"
     context += f"- Console checks: {enhanced_data.get('console_check_count', 0)}\n"
-    context += f"- Navigate → Screenshot pattern: {enhanced_data.get('has_good_nav_pattern', 'unknown')}\n"
+    context += f"- Navigate -> Screenshot pattern: {enhanced_data.get('has_good_nav_pattern', 'unknown')}\n"
 
     # Task Completion Timeline
     context += f"\n\n## Task Completion Timeline\n"

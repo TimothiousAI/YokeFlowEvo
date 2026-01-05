@@ -595,15 +595,15 @@ class ParallelExecutor:
 **Epic:** {epic_name}
 **Priority:** {priority}
 
-## 🎯 Task Objective
+## * Task Objective
 
 {task_desc}
 
-## 📋 Implementation Instructions
+## ## Implementation Instructions
 
 {task_action}
 
-## 🔧 Worktree Context (IMPORTANT)
+## * Worktree Context (IMPORTANT)
 
 You are executing in an **isolated git worktree** for parallel development:
 
@@ -691,7 +691,7 @@ You are executing in an **isolated git worktree** for parallel development:
 - Use conventional commit format: "feat:", "fix:", "docs:", etc.
 - Commit frequently with logical groupings
 
-## 🔍 Verification Requirements
+## * Verification Requirements
 
 **Before marking this task complete, you MUST:**
 

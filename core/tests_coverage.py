@@ -194,11 +194,11 @@ async def analyze_test_coverage(db, project_id: UUID) -> Dict[str, Any]:
         # Generate warnings
         warnings = []
         if coverage_percentage < 50:
-            warnings.append(f"⚠️ Overall test coverage is low ({coverage_percentage:.0f}%). Consider adding more tests.")
+            warnings.append(f"[!] Overall test coverage is low ({coverage_percentage:.0f}%). Consider adding more tests.")
         if len(poor_coverage_epics) > 0:
-            warnings.append(f"⚠️ {len(poor_coverage_epics)} epic(s) have poor test coverage (>50% tasks without tests).")
+            warnings.append(f"[!] {len(poor_coverage_epics)} epic(s) have poor test coverage (>50% tasks without tests).")
         if tasks_without_tests > len(tasks) * 0.3:
-            warnings.append(f"⚠️ {tasks_without_tests} tasks ({tasks_without_tests/len(tasks)*100:.0f}%) have no tests.")
+            warnings.append(f"[!] {tasks_without_tests} tasks ({tasks_without_tests/len(tasks)*100:.0f}%) have no tests.")
 
         # Convert epic_stats to list and sort by epic_id
         by_epic = sorted(epic_stats.values(), key=lambda x: x['epic_id'])

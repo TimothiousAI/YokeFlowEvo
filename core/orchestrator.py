@@ -594,7 +594,7 @@ class AgentOrchestrator:
                         project = await db.get_project(project_id)
                         if project and project.get('local_path'):
                             project_path = Path(project['local_path'])
-                            logger.info("🔍 Triggering final deep review for completed project")
+                            logger.info("* Triggering final deep review for completed project")
                             await self.quality.maybe_trigger_deep_review(
                                 session_id=last_session.session_id,
                                 project_path=project_path,

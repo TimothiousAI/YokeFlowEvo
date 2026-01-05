@@ -254,7 +254,7 @@ async def main():
         else:
             # Drop and recreate if requested
             if args.drop:
-                response = input("⚠️  WARNING: This will DROP the database and all data. Continue? (yes/no): ")
+                response = input("[!]  WARNING: This will DROP the database and all data. Continue? (yes/no): ")
                 if response.lower() != 'yes':
                     logger.info("Aborted")
                     return

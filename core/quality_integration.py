@@ -166,7 +166,7 @@ class QualityIntegration:
             # If force_final_review is True (project completion), always trigger
             if force_final_review:
                 should_trigger = True
-                logger.info(f"🔍 Forcing final deep review for completed project (session {session_number})")
+                logger.info(f"* Forcing final deep review for completed project (session {session_number})")
             else:
                 should_trigger = await should_trigger_deep_review(project_id, session_number, session_quality)
 
@@ -175,17 +175,17 @@ class QualityIntegration:
 
             # Log trigger reason
             if force_final_review:
-                logger.info(f"🔍 Triggering deep review for session {session_id} (project completion)")
+                logger.info(f"* Triggering deep review for session {session_id} (project completion)")
             elif session_quality is not None:
-                logger.info(f"🔍 Triggering deep review for session {session_id} (quality: {session_quality}/10)")
+                logger.info(f"* Triggering deep review for session {session_id} (quality: {session_quality}/10)")
             else:
-                logger.info(f"🔍 Triggering deep review for session {session_id}")
+                logger.info(f"* Triggering deep review for session {session_id}")
 
             # For final reviews (project completion), wait for completion
             # For regular reviews, run in background to not block session flow
             if force_final_review:
                 # Wait for final review to complete (important for project completion)
-                logger.info(f"🔍 Running final deep review synchronously (project completion)")
+                logger.info(f"* Running final deep review synchronously (project completion)")
                 await self._run_deep_review_background(session_id, project_path)
             else:
                 # Run deep review asynchronously (non-blocking)
@@ -214,7 +214,7 @@ class QualityIntegration:
         try:
             from review.review_client import run_deep_review
 
-            logger.info(f"🔍 Starting background deep review for session {session_id}")
+            logger.info(f"* Starting background deep review for session {session_id}")
 
             result = await run_deep_review(
                 session_id=session_id,

@@ -69,14 +69,14 @@ async def cleanup_stale_sessions(project_name: str = None, force: bool = False):
     running = await list_running_sessions()
 
     if not running:
-        print("✓ No running sessions found.\n")
+        print("[OK] No running sessions found.\n")
         return 0
 
     # Filter by project if specified
     if project_name:
         running = [s for s in running if s['project_name'] == project_name]
         if not running:
-            print(f"✓ No running sessions found for project '{project_name}'.\n")
+            print(f"[OK] No running sessions found for project '{project_name}'.\n")
             return 0
 
     # Display running sessions
@@ -104,7 +104,7 @@ async def cleanup_stale_sessions(project_name: str = None, force: bool = False):
 
     # Cleanup
     if force:
-        print("⚠️  Force mode enabled - will mark ALL running sessions as interrupted\n")
+        print("[!]  Force mode enabled - will mark ALL running sessions as interrupted\n")
         confirmation = input("Are you sure you want to continue? (yes/no): ")
         if confirmation.lower() != 'yes':
             print("\nCancelled.")
@@ -123,17 +123,17 @@ async def cleanup_stale_sessions(project_name: str = None, force: bool = False):
                     """
                 )
                 count = int(result.split()[-1]) if result else 0
-                print(f"\n✓ Marked {count} session(s) as interrupted (force mode)\n")
+                print(f"\n[OK] Marked {count} session(s) as interrupted (force mode)\n")
                 return count
     else:
         # Normal cleanup (uses time-based thresholds)
         count = await orchestrator.cleanup_stale_sessions()
 
         if count > 0:
-            print(f"✓ Marked {count} stale session(s) as interrupted\n")
+            print(f"[OK] Marked {count} stale session(s) as interrupted\n")
         else:
-            print("✓ No stale sessions found (all sessions are still within normal runtime)\n")
-            print("💡 If you need to stop an active session, use --force flag\n")
+            print("[OK] No stale sessions found (all sessions are still within normal runtime)\n")
+            print("* If you need to stop an active session, use --force flag\n")
 
         return count
 

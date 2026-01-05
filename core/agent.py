@@ -71,7 +71,7 @@ class SessionManager:
             try:
                 print("\nFinalizing session logs...")
                 self.current_logger.finalize("interrupted", "Session interrupted by user")
-                print("✓ Session logs saved")
+                print("[OK] Session logs saved")
             except Exception as e:
                 print(f"Warning: Could not finalize session logs: {e}")
 
@@ -269,7 +269,7 @@ async def run_agent_session(
                                         }
                                     )
 
-                                print(f"\n📋 Session paused (ID: {paused_session_id})")
+                                print(f"\n## Session paused (ID: {paused_session_id})")
                                 print(f"   To resume: Use the Web UI or API to resolve and resume")
                                 print(f"   API endpoint: POST /api/interventions/{paused_session_id}/resume\n")
 

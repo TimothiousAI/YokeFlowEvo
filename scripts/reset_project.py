@@ -66,19 +66,19 @@ class ProjectResetter:
         """
         # Check project directory exists
         if not self.project_path.exists():
-            print(f"❌ Error: Project directory not found: {self.project_path}")
+            print(f"[X] Error: Project directory not found: {self.project_path}")
             return False
 
         # Check if it's a git repository
         if not (self.project_path / ".git").exists():
-            print(f"❌ Error: Project is not a git repository: {self.project_path}")
+            print(f"[X] Error: Project is not a git repository: {self.project_path}")
             return False
 
         # Check if project exists in PostgreSQL database
         async with DatabaseManager() as db:
             project = await db.get_project_by_name(self.project_name)
             if not project:
-                print(f"❌ Error: Project not found in database: {self.project_name}")
+                print(f"[X] Error: Project not found in database: {self.project_name}")
                 print("   This doesn't appear to be an initialized autonomous coding project.")
                 return False
 
@@ -116,7 +116,7 @@ class ProjectResetter:
                 sessions = await db.list_sessions(self.project_id)
                 state["sessions"] = len(sessions)
         except Exception as e:
-            print(f"⚠️  Warning: Could not read database: {e}")
+            print(f"[!]  Warning: Could not read database: {e}")
 
         # Get git commit count
         try:
@@ -129,7 +129,7 @@ class ProjectResetter:
             )
             state["git_commits"] = int(result.stdout.strip())
         except Exception as e:
-            print(f"⚠️  Warning: Could not count git commits: {e}")
+            print(f"[!]  Warning: Could not count git commits: {e}")
 
         # Count coding session logs (session_002 and higher)
         if self.logs_dir.exists():
@@ -250,7 +250,7 @@ class ProjectResetter:
             return ""
 
         except Exception as e:
-            print(f"⚠️  Warning: Could not find initialization commit: {e}")
+            print(f"[!]  Warning: Could not find initialization commit: {e}")
             return ""
 
     async def reset_database(self) -> bool:
@@ -286,7 +286,7 @@ class ProjectResetter:
                         """,
                         self.project_id,
                     )
-                    print(f"  ✅ Reset tasks to incomplete")
+                    print(f"  [OK] Reset tasks to incomplete")
 
                     # Reset tests
                     result = await conn.execute(
@@ -300,7 +300,7 @@ class ProjectResetter:
                         """,
                         self.project_id,
                     )
-                    print(f"  ✅ Reset tests to not passing")
+                    print(f"  [OK] Reset tests to not passing")
 
                     # Reset epics (only those not complete)
                     result = await conn.execute(
@@ -314,7 +314,7 @@ class ProjectResetter:
                         """,
                         self.project_id,
                     )
-                    print(f"  ✅ Reset epics to pending")
+                    print(f"  [OK] Reset epics to pending")
 
                     # Delete coding session records (keep session 0 - initialization)
                     result = await conn.execute(
@@ -325,12 +325,12 @@ class ProjectResetter:
                         """,
                         self.project_id,
                     )
-                    print(f"  ✅ Deleted coding session records (kept session 0 - initialization)")
+                    print(f"  [OK] Deleted coding session records (kept session 0 - initialization)")
 
             return True
 
         except Exception as e:
-            print(f"❌ Error resetting database: {e}")
+            print(f"[X] Error resetting database: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -351,7 +351,7 @@ class ProjectResetter:
             True if successful, False otherwise
         """
         if not init_commit:
-            print("❌ Error: No initialization commit found")
+            print("[X] Error: No initialization commit found")
             return False
 
         if self.dry_run:
@@ -381,7 +381,7 @@ class ProjectResetter:
                 check=True,
                 capture_output=True,
             )
-            print(f"  ✅ Reset HEAD to: {init_commit[:8]}")
+            print(f"  [OK] Reset HEAD to: {init_commit[:8]}")
 
             # 2. Expire reflog immediately (makes old commits invisible to git log --all)
             subprocess.run(
@@ -390,7 +390,7 @@ class ProjectResetter:
                 check=True,
                 capture_output=True,
             )
-            print(f"  ✅ Expired reflog entries")
+            print(f"  [OK] Expired reflog entries")
 
             # 3. Prune orphaned objects (removes unreachable commits)
             subprocess.run(
@@ -399,7 +399,7 @@ class ProjectResetter:
                 check=True,
                 capture_output=True,
             )
-            print(f"  ✅ Pruned orphaned commits")
+            print(f"  [OK] Pruned orphaned commits")
 
             # 4. Clean working directory (remove untracked files)
             subprocess.run(
@@ -408,16 +408,16 @@ class ProjectResetter:
                 check=True,
                 capture_output=True,
             )
-            print(f"  ✅ Cleaned working directory")
+            print(f"  [OK] Cleaned working directory")
 
-            print(f"  ✅ Git fully reset to initialization commit")
+            print(f"  [OK] Git fully reset to initialization commit")
             print(f"     Branch: {current_branch}")
             print(f"     Commit: {init_commit[:8]}")
 
             return True
 
         except subprocess.CalledProcessError as e:
-            print(f"❌ Error resetting git: {e}")
+            print(f"[X] Error resetting git: {e}")
             return False
 
     def archive_logs(self) -> bool:
@@ -462,7 +462,7 @@ class ProjectResetter:
                 dest = archive_dir / log_file.name
                 shutil.move(str(log_file), str(dest))
 
-            print(f"  ✅ Archived {len(logs_to_archive)} log files to:")
+            print(f"  [OK] Archived {len(logs_to_archive)} log files to:")
             print(f"     {archive_dir.relative_to(self.project_path)}")
 
             # Note: sessions_summary.jsonl has been removed from codebase
@@ -471,7 +471,7 @@ class ProjectResetter:
             return True
 
         except Exception as e:
-            print(f"❌ Error archiving logs: {e}")
+            print(f"[X] Error archiving logs: {e}")
             return False
 
     def reset_progress_notes(self) -> bool:
@@ -520,12 +520,12 @@ See session_001 logs for initialization details.
 """
 
             progress_file.write_text(initial_content, encoding='utf-8')
-            print("  ✅ Backed up and reset claude-progress.md")
+            print("  [OK] Backed up and reset claude-progress.md")
 
             return True
 
         except Exception as e:
-            print(f"❌ Error resetting progress notes: {e}")
+            print(f"[X] Error resetting progress notes: {e}")
             return False
 
     async def perform_reset(self) -> bool:
@@ -555,7 +555,7 @@ See session_001 logs for initialization details.
         init_commit = self.find_init_commit()
 
         if not init_commit:
-            print("❌ Could not find initialization commit.")
+            print("[X] Could not find initialization commit.")
             print("   Cannot safely reset without knowing the init commit.")
             return False
 
@@ -568,9 +568,9 @@ See session_001 logs for initialization details.
                 text=True,
                 check=True,
             )
-            print(f"  ✅ Found: {result.stdout.strip()}")
+            print(f"  [OK] Found: {result.stdout.strip()}")
         except Exception as e:
-            print(f"  ⚠️  Could not display commit: {e}")
+            print(f"  [!]  Could not display commit: {e}")
 
         if self.dry_run:
             print("\n[DRY RUN MODE - No changes will be made]")
@@ -605,7 +605,7 @@ See session_001 logs for initialization details.
         if self.dry_run:
             print("  DRY RUN COMPLETE - No changes made")
         else:
-            print("  ✅ RESET COMPLETE")
+            print("  [OK] RESET COMPLETE")
         print(f"{'='*70}\n")
 
         if not self.dry_run:
@@ -640,7 +640,7 @@ async def async_main(args):
 
     # Confirmation (unless --yes or --dry-run)
     if not args.yes and not args.dry_run:
-        print("\n⚠️  WARNING: This will reset the project to post-initialization state.")
+        print("\n[!]  WARNING: This will reset the project to post-initialization state.")
         print("   - All task/test completion will be cleared in PostgreSQL")
         print("   - Git history will be reset to initialization commit")
         print("   - Coding session logs will be archived")
@@ -709,7 +709,7 @@ Benefits:
         print("\n\nReset cancelled by user.")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Reset failed: {e}")
+        print(f"\n[X] Reset failed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
