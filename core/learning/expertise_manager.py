@@ -631,19 +631,553 @@ class ExpertiseManager:
                 'changes': []
             }
 
-    async def self_improve(self, domain: str) -> None:
+    async def self_improve(self, domain: str) -> Dict[str, Any]:
         """
         Scan codebase to discover patterns and update expertise.
 
+        Performs intelligent codebase scanning to extract:
+        - Relevant files for the domain
+        - Common patterns and conventions
+        - Library usage patterns
+        - Code style preferences
+
         Args:
             domain: Domain name
-        """
-        # Stub - will be implemented in Epic 94
-        logger.warning("ExpertiseManager.self_improve() not yet implemented")
 
-    def format_for_prompt(self, domain: str) -> str:
+        Returns:
+            Dict with scan results and update summary
+        """
+        try:
+            from pathlib import Path
+            import re
+
+            logger.info(f"Starting self-improvement scan for domain '{domain}'")
+
+            # Get or create expertise for this domain
+            expertise = await self.get_expertise(domain)
+            if not expertise:
+                # Initialize new expertise
+                content = {
+                    'core_files': [],
+                    'patterns': [],
+                    'techniques': [],
+                    'learnings': []
+                }
+            else:
+                content = expertise.content
+
+            # Initialize scan results
+            discovered_files = []
+            discovered_patterns = []
+            discovered_libraries = set()
+
+            # 1. Scan for relevant files (limit to 50 files to avoid token bloat)
+            relevant_files = self._scan_relevant_files(domain, limit=50)
+            logger.debug(f"Found {len(relevant_files)} relevant files for '{domain}'")
+
+            # 2. Extract patterns and conventions from files
+            file_scan_limit = min(20, len(relevant_files))  # Scan max 20 files deeply
+            for file_path in relevant_files[:file_scan_limit]:
+                try:
+                    # Read file content (limit to first 500 lines to avoid huge files)
+                    path_obj = Path(file_path)
+                    if not path_obj.exists() or not path_obj.is_file():
+                        continue
+
+                    # Skip binary files, large files
+                    if path_obj.stat().st_size > 500_000:  # Skip files > 500KB
+                        continue
+
+                    with open(path_obj, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()[:500]  # Max 500 lines
+                        file_content = ''.join(lines)
+
+                    # Extract imports/libraries
+                    libs = self._extract_libraries(file_content, file_path)
+                    discovered_libraries.update(libs)
+
+                    # Extract code patterns
+                    patterns = self._extract_code_patterns(file_content, file_path, domain)
+                    discovered_patterns.extend(patterns)
+
+                    # Add to discovered files
+                    if file_path not in content['core_files']:
+                        discovered_files.append(file_path)
+
+                except Exception as e:
+                    logger.debug(f"Failed to scan file {file_path}: {e}")
+                    continue
+
+            # 3. Update expertise content
+            changes_made = []
+
+            # Add new files (limit total to 50)
+            for file_path in discovered_files:
+                if file_path not in content['core_files'] and len(content['core_files']) < 50:
+                    content['core_files'].append(file_path)
+                    changes_made.append(f"Added core file: {file_path}")
+
+            # Add discovered patterns (avoid duplicates)
+            for pattern in discovered_patterns:
+                pattern_name = pattern.get('name', '')
+                existing = any(p.get('name') == pattern_name for p in content.get('patterns', []))
+                if not existing and len(content.get('patterns', [])) < 30:
+                    if 'patterns' not in content:
+                        content['patterns'] = []
+                    content['patterns'].append(pattern)
+                    changes_made.append(f"Added pattern: {pattern_name}")
+
+            # Add library usage insights
+            if discovered_libraries:
+                libraries_list = sorted(list(discovered_libraries))[:20]  # Limit to 20 libs
+                library_insight = {
+                    'type': 'success',
+                    'lesson': f"Common libraries in {domain}: {', '.join(libraries_list)}",
+                    'date': datetime.now().isoformat()
+                }
+
+                # Check if similar library insight exists
+                existing_lib_insight = any(
+                    'Common libraries' in l.get('lesson', '')
+                    for l in content.get('learnings', [])
+                )
+
+                if not existing_lib_insight:
+                    if 'learnings' not in content:
+                        content['learnings'] = []
+                    content['learnings'].append(library_insight)
+                    changes_made.append(f"Added library insight: {len(libraries_list)} libraries")
+
+            # 4. Save updated expertise if changes were made
+            if changes_made:
+                # Calculate line count
+                line_count = len(json.dumps(content, indent=2).split('\n'))
+
+                # Enforce line limit
+                if line_count > MAX_EXPERTISE_LINES:
+                    logger.warning(f"Expertise for '{domain}' exceeds {MAX_EXPERTISE_LINES} lines, pruning...")
+                    content = self._prune_expertise_to_limit(content)
+                    line_count = len(json.dumps(content, indent=2).split('\n'))
+                    changes_made.append(f"Pruned to {MAX_EXPERTISE_LINES} line limit")
+
+                # Save to database
+                saved = await self.db.save_expertise(
+                    self.project_id,
+                    domain,
+                    content,
+                    line_count
+                )
+
+                # Record update in history
+                await self.db.record_expertise_update(
+                    expertise_id=saved['id'],
+                    session_id=None,
+                    change_type='self_improved',
+                    summary=f"Self-improvement scan: {len(changes_made)} changes",
+                    diff='\n'.join(changes_made)
+                )
+
+                logger.info(f"Self-improvement scan for '{domain}' complete: {len(changes_made)} changes")
+
+                return {
+                    'status': 'success',
+                    'domain': domain,
+                    'files_scanned': file_scan_limit,
+                    'files_added': len(discovered_files),
+                    'patterns_added': len([c for c in changes_made if 'pattern' in c.lower()]),
+                    'changes': changes_made,
+                    'line_count': line_count
+                }
+            else:
+                logger.info(f"Self-improvement scan for '{domain}' found no new insights")
+                return {
+                    'status': 'no_changes',
+                    'domain': domain,
+                    'files_scanned': file_scan_limit
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to self-improve for domain '{domain}': {e}")
+            return {
+                'status': 'error',
+                'error': str(e)
+            }
+
+    def _scan_relevant_files(self, domain: str, limit: int = 50) -> List[str]:
+        """
+        Scan codebase for files relevant to domain.
+
+        Args:
+            domain: Domain name
+            limit: Maximum number of files to return
+
+        Returns:
+            List of file paths relevant to the domain
+        """
+        from pathlib import Path
+        import os
+
+        relevant_files = []
+        search_patterns = DOMAIN_FILE_PATTERNS.get(domain, [])
+
+        try:
+            # Walk project directory
+            project_root = Path.cwd()
+
+            # Directories to skip
+            skip_dirs = {
+                '.git', '__pycache__', 'node_modules', '.venv', 'venv',
+                'dist', 'build', '.pytest_cache', '.mypy_cache', '.tox',
+                '.worktrees', '.expertise', 'logs'
+            }
+
+            for root, dirs, files in os.walk(project_root):
+                # Skip excluded directories
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    rel_path = os.path.relpath(file_path, project_root)
+
+                    # Check if file matches domain patterns
+                    file_lower = filename.lower()
+                    path_lower = rel_path.lower()
+
+                    # Check file extension and path patterns
+                    matches_pattern = any(
+                        pattern in file_lower or pattern in path_lower
+                        for pattern in search_patterns
+                    )
+
+                    if matches_pattern:
+                        relevant_files.append(rel_path)
+
+                        if len(relevant_files) >= limit:
+                            return relevant_files
+
+            return relevant_files
+
+        except Exception as e:
+            logger.error(f"Failed to scan files for domain '{domain}': {e}")
+            return []
+
+    def _extract_libraries(self, file_content: str, file_path: str) -> set:
+        """
+        Extract library/package imports from file content.
+
+        Args:
+            file_content: Content of the file
+            file_path: Path to the file (for language detection)
+
+        Returns:
+            Set of library names
+        """
+        import re
+
+        libraries = set()
+
+        try:
+            # Python imports
+            if file_path.endswith('.py'):
+                # import statements: import foo, from foo import bar
+                for match in re.finditer(r'^\s*(?:from|import)\s+([a-zA-Z_][a-zA-Z0-9_]*)', file_content, re.MULTILINE):
+                    lib_name = match.group(1)
+                    # Skip standard library and local imports
+                    if lib_name not in {'os', 'sys', 're', 'json', 'time', 'datetime', 'pathlib', 'typing', 'logging'}:
+                        libraries.add(lib_name)
+
+            # JavaScript/TypeScript imports
+            elif file_path.endswith(('.js', '.jsx', '.ts', '.tsx')):
+                # import statements: import foo from 'bar'
+                for match in re.finditer(r'import\s+.*?\s+from\s+[\'"]([^\'\"]+)[\'"]', file_content):
+                    lib_name = match.group(1)
+                    # Skip relative imports
+                    if not lib_name.startswith('.'):
+                        # Extract package name (before /)
+                        package = lib_name.split('/')[0]
+                        if package.startswith('@'):
+                            # Scoped package like @react/foo
+                            package = '/'.join(lib_name.split('/')[:2])
+                        libraries.add(package)
+
+                # require statements: const foo = require('bar')
+                for match in re.finditer(r'require\s*\(\s*[\'"]([^\'\"]+)[\'"]\s*\)', file_content):
+                    lib_name = match.group(1)
+                    if not lib_name.startswith('.'):
+                        package = lib_name.split('/')[0]
+                        if package.startswith('@'):
+                            package = '/'.join(lib_name.split('/')[:2])
+                        libraries.add(package)
+
+        except Exception as e:
+            logger.debug(f"Failed to extract libraries from {file_path}: {e}")
+
+        return libraries
+
+    def _extract_code_patterns(self, file_content: str, file_path: str, domain: str) -> List[Dict[str, Any]]:
+        """
+        Extract code patterns and conventions from file content.
+
+        Args:
+            file_content: Content of the file
+            file_path: Path to the file
+            domain: Domain being scanned
+
+        Returns:
+            List of pattern dictionaries
+        """
+        import re
+
+        patterns = []
+
+        try:
+            # Python patterns
+            if file_path.endswith('.py'):
+                # Async function pattern
+                if 'async def' in file_content:
+                    async_funcs = re.findall(r'async def (\w+)\(', file_content)
+                    if async_funcs:
+                        patterns.append({
+                            'name': 'Async functions pattern',
+                            'language': 'python',
+                            'description': f'Uses async/await pattern for {", ".join(async_funcs[:3])}',
+                            'when_to_use': 'For I/O-bound operations like database queries, API calls'
+                        })
+
+                # Class-based pattern
+                class_match = re.search(r'class\s+(\w+)', file_content)
+                if class_match:
+                    class_name = class_match.group(1)
+                    patterns.append({
+                        'name': f'{class_name} class pattern',
+                        'language': 'python',
+                        'description': f'Class-based architecture using {class_name}',
+                        'when_to_use': f'For {domain} operations'
+                    })
+
+                # Decorator pattern
+                if '@' in file_content:
+                    decorators = re.findall(r'@(\w+)', file_content)
+                    if decorators:
+                        patterns.append({
+                            'name': 'Decorator pattern',
+                            'language': 'python',
+                            'description': f'Uses decorators: {", ".join(set(decorators[:5]))}',
+                            'when_to_use': 'For cross-cutting concerns like logging, auth, caching'
+                        })
+
+            # JavaScript/TypeScript patterns
+            elif file_path.endswith(('.js', '.jsx', '.ts', '.tsx')):
+                # React component pattern
+                if 'export' in file_content and ('function' in file_content or 'const' in file_content):
+                    component_match = re.search(r'export\s+(?:default\s+)?(?:function|const)\s+(\w+)', file_content)
+                    if component_match:
+                        comp_name = component_match.group(1)
+                        patterns.append({
+                            'name': f'{comp_name} component pattern',
+                            'language': 'typescript' if file_path.endswith(('.ts', '.tsx')) else 'javascript',
+                            'description': f'React component: {comp_name}',
+                            'when_to_use': 'For UI components in frontend'
+                        })
+
+                # Hook usage pattern
+                if 'useState' in file_content or 'useEffect' in file_content:
+                    hooks = []
+                    if 'useState' in file_content:
+                        hooks.append('useState')
+                    if 'useEffect' in file_content:
+                        hooks.append('useEffect')
+                    # Look for custom hooks
+                    custom_hooks = re.findall(r'use[A-Z]\w+', file_content)
+                    hooks.extend(list(set(custom_hooks))[:3])
+
+                    patterns.append({
+                        'name': 'React Hooks pattern',
+                        'language': 'typescript' if file_path.endswith(('.ts', '.tsx')) else 'javascript',
+                        'description': f'Uses React hooks: {", ".join(hooks[:5])}',
+                        'when_to_use': 'For state management and side effects in functional components'
+                    })
+
+            # SQL patterns
+            elif file_path.endswith('.sql'):
+                # DDL pattern
+                if 'CREATE TABLE' in file_content.upper():
+                    patterns.append({
+                        'name': 'DDL schema definition',
+                        'language': 'sql',
+                        'description': 'Database schema definitions with CREATE TABLE',
+                        'when_to_use': 'For database migrations and schema setup'
+                    })
+
+                # Trigger pattern
+                if 'CREATE TRIGGER' in file_content.upper():
+                    patterns.append({
+                        'name': 'Database triggers',
+                        'language': 'sql',
+                        'description': 'Uses database triggers for automated operations',
+                        'when_to_use': 'For automatic timestamp updates, validation, audit trails'
+                    })
+
+        except Exception as e:
+            logger.debug(f"Failed to extract patterns from {file_path}: {e}")
+
+        return patterns
+
+    def _enforce_line_limit(self, content: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Enforce MAX_EXPERTISE_LINES limit with intelligent pruning.
+
+        Strategy (applied in order until under limit):
+        1. Remove failure learnings older than 30 days
+        2. Trim oldest patterns (keep newest 20)
+        3. Limit core files to most relevant (keep 30)
+        4. Trim techniques (keep 15)
+        5. Trim remaining learnings (keep newest 20)
+
+        Args:
+            content: Expertise content dict
+
+        Returns:
+            Pruned content dict that fits within MAX_EXPERTISE_LINES
+        """
+        from datetime import datetime, timedelta
+
+        def get_line_count(content_dict: Dict[str, Any]) -> int:
+            """Calculate line count for content."""
+            return len(json.dumps(content_dict, indent=2).split('\n'))
+
+        current_lines = get_line_count(content)
+
+        # If already under limit, return as-is
+        if current_lines <= MAX_EXPERTISE_LINES:
+            return content
+
+        logger.info(
+            f"Expertise exceeds {MAX_EXPERTISE_LINES} lines ({current_lines} lines), "
+            f"applying intelligent pruning..."
+        )
+
+        # Step 1: Remove failure learnings older than 30 days
+        if 'learnings' in content and current_lines > MAX_EXPERTISE_LINES:
+            cutoff_date = datetime.now() - timedelta(days=30)
+            original_count = len(content['learnings'])
+            fresh_learnings = []
+
+            for learning in content['learnings']:
+                # Keep successes and recent failures
+                if learning.get('type') != 'failure':
+                    fresh_learnings.append(learning)
+                else:
+                    # Check age of failure
+                    learning_date_str = learning.get('date')
+                    if learning_date_str:
+                        try:
+                            learning_date = datetime.fromisoformat(
+                                learning_date_str.replace('Z', '+00:00')
+                            )
+                            if learning_date > cutoff_date:
+                                fresh_learnings.append(learning)
+                        except (ValueError, AttributeError):
+                            # Keep if date parsing fails (safer)
+                            fresh_learnings.append(learning)
+                    else:
+                        # Keep if no date
+                        fresh_learnings.append(learning)
+
+            if len(fresh_learnings) < original_count:
+                content['learnings'] = fresh_learnings
+                current_lines = get_line_count(content)
+                logger.debug(
+                    f"Removed {original_count - len(fresh_learnings)} old failures, "
+                    f"now {current_lines} lines"
+                )
+
+        # Step 2: Trim oldest patterns (keep newest 20)
+        if 'patterns' in content and current_lines > MAX_EXPERTISE_LINES:
+            if len(content['patterns']) > 20:
+                content['patterns'] = content['patterns'][:20]
+                current_lines = get_line_count(content)
+                logger.debug(f"Trimmed patterns to 20, now {current_lines} lines")
+
+        # Step 3: Limit core files to 30 most relevant
+        if 'core_files' in content and current_lines > MAX_EXPERTISE_LINES:
+            if len(content['core_files']) > 30:
+                content['core_files'] = content['core_files'][:30]
+                current_lines = get_line_count(content)
+                logger.debug(f"Trimmed core files to 30, now {current_lines} lines")
+
+        # Step 4: Trim techniques (keep 15)
+        if 'techniques' in content and current_lines > MAX_EXPERTISE_LINES:
+            if len(content['techniques']) > 15:
+                content['techniques'] = content['techniques'][:15]
+                current_lines = get_line_count(content)
+                logger.debug(f"Trimmed techniques to 15, now {current_lines} lines")
+
+        # Step 5: Trim remaining learnings (keep newest 20)
+        if 'learnings' in content and current_lines > MAX_EXPERTISE_LINES:
+            if len(content['learnings']) > 20:
+                # Sort by date (newest first)
+                learnings_sorted = sorted(
+                    content['learnings'],
+                    key=lambda x: x.get('date', ''),
+                    reverse=True
+                )
+                content['learnings'] = learnings_sorted[:20]
+                current_lines = get_line_count(content)
+                logger.debug(f"Trimmed learnings to 20, now {current_lines} lines")
+
+        # Step 6: If still over limit, aggressively trim all sections
+        if current_lines > MAX_EXPERTISE_LINES:
+            logger.warning(
+                f"Still over limit after standard pruning ({current_lines} lines), "
+                f"applying aggressive pruning..."
+            )
+
+            # Aggressively trim each section
+            if 'core_files' in content:
+                content['core_files'] = content['core_files'][:15]
+            if 'patterns' in content:
+                content['patterns'] = content['patterns'][:10]
+            if 'techniques' in content:
+                content['techniques'] = content['techniques'][:8]
+            if 'learnings' in content:
+                content['learnings'] = sorted(
+                    content['learnings'],
+                    key=lambda x: x.get('date', ''),
+                    reverse=True
+                )[:10]
+
+            current_lines = get_line_count(content)
+            logger.info(f"After aggressive pruning: {current_lines} lines")
+
+        logger.info(
+            f"Line limit enforcement complete: {current_lines} lines "
+            f"({MAX_EXPERTISE_LINES - current_lines} under limit)"
+        )
+
+        return content
+
+    def _prune_expertise_to_limit(self, content: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Legacy pruning method - delegates to _enforce_line_limit.
+
+        Args:
+            content: Expertise content dict
+
+        Returns:
+            Pruned content dict
+        """
+        return self._enforce_line_limit(content)
+
+    async def format_for_prompt(self, domain: str) -> str:
         """
         Format expertise as markdown for prompt injection.
+
+        Produces readable markdown with sections for:
+        - Core Files (relevant files to reference)
+        - Patterns (code patterns and conventions)
+        - Techniques (successful workflows)
+        - Recent Learnings (failures and successes)
 
         Args:
             domain: Domain name
@@ -651,6 +1185,143 @@ class ExpertiseManager:
         Returns:
             Formatted markdown string (limited to MAX_EXPERTISE_LINES)
         """
-        # Stub - will be implemented in Epic 94
-        logger.warning("ExpertiseManager.format_for_prompt() not yet implemented")
-        return ""
+        try:
+            # Get expertise for domain
+            expertise = await self.get_expertise(domain)
+            if not expertise:
+                logger.debug(f"No expertise found for domain '{domain}', returning empty string")
+                return ""
+
+            content = expertise.content
+            lines = []
+
+            # Header
+            lines.append(f"# Expertise: {domain.title()} Domain")
+            lines.append("")
+            lines.append(f"*Version {expertise.version} - Accumulated knowledge from past sessions*")
+            lines.append("")
+
+            # Section 1: Core Files
+            if content.get('core_files'):
+                lines.append("## Core Files")
+                lines.append("")
+                lines.append("Key files to reference for this domain:")
+                lines.append("")
+
+                # Limit to top 15 most relevant files
+                for file_path in content['core_files'][:15]:
+                    lines.append(f"- `{file_path}`")
+
+                if len(content['core_files']) > 15:
+                    lines.append(f"- ... and {len(content['core_files']) - 15} more files")
+
+                lines.append("")
+
+            # Section 2: Code Patterns
+            if content.get('patterns'):
+                lines.append("## Code Patterns & Conventions")
+                lines.append("")
+
+                # Limit to top 10 patterns
+                for i, pattern in enumerate(content['patterns'][:10], 1):
+                    pattern_name = pattern.get('name', 'Unnamed pattern')
+                    pattern_desc = pattern.get('description', '')
+                    pattern_when = pattern.get('when_to_use', '')
+                    pattern_lang = pattern.get('language', '')
+
+                    lines.append(f"### {i}. {pattern_name}")
+                    if pattern_lang:
+                        lines.append(f"*Language: {pattern_lang}*")
+                    if pattern_desc:
+                        lines.append(f"- **Description:** {pattern_desc}")
+                    if pattern_when:
+                        lines.append(f"- **When to use:** {pattern_when}")
+                    lines.append("")
+
+                if len(content['patterns']) > 10:
+                    lines.append(f"*... and {len(content['patterns']) - 10} more patterns*")
+                    lines.append("")
+
+            # Section 3: Techniques & Workflows
+            if content.get('techniques'):
+                lines.append("## Successful Techniques")
+                lines.append("")
+
+                # Limit to top 8 techniques
+                for i, technique in enumerate(content['techniques'][:8], 1):
+                    tech_name = technique.get('name', 'Unnamed technique')
+                    tech_steps = technique.get('steps', [])
+
+                    lines.append(f"### {i}. {tech_name}")
+                    if tech_steps:
+                        lines.append("")
+                        for step in tech_steps:
+                            lines.append(f"- {step}")
+                    lines.append("")
+
+                if len(content['techniques']) > 8:
+                    lines.append(f"*... and {len(content['techniques']) - 8} more techniques*")
+                    lines.append("")
+
+            # Section 4: Recent Learnings (successes and failures)
+            if content.get('learnings'):
+                # Separate by type
+                failures = [l for l in content['learnings'] if l.get('type') == 'failure']
+                successes = [l for l in content['learnings'] if l.get('type') == 'success']
+
+                if failures:
+                    lines.append("## Known Issues & Failures")
+                    lines.append("")
+                    lines.append("*Learn from past mistakes:*")
+                    lines.append("")
+
+                    # Show most recent 5 failures
+                    for failure in failures[:5]:
+                        lesson = failure.get('lesson', 'No details')
+                        lines.append(f"- {lesson}")
+
+                    if len(failures) > 5:
+                        lines.append(f"- ... and {len(failures) - 5} more known issues")
+
+                    lines.append("")
+
+                if successes:
+                    lines.append("## Success Insights")
+                    lines.append("")
+
+                    # Show most recent 5 successes
+                    for success in successes[:5]:
+                        lesson = success.get('lesson', 'No details')
+                        lines.append(f"- {lesson}")
+
+                    if len(successes) > 5:
+                        lines.append(f"- ... and {len(successes) - 5} more insights")
+
+                    lines.append("")
+
+            # Join all lines
+            formatted = '\n'.join(lines)
+
+            # Enforce line limit
+            formatted_lines = formatted.split('\n')
+            if len(formatted_lines) > MAX_EXPERTISE_LINES:
+                logger.warning(
+                    f"Formatted expertise for '{domain}' exceeds {MAX_EXPERTISE_LINES} lines "
+                    f"({len(formatted_lines)} lines), truncating..."
+                )
+                # Truncate and add notice
+                formatted_lines = formatted_lines[:MAX_EXPERTISE_LINES - 2]
+                formatted_lines.append("")
+                formatted_lines.append(f"*[Truncated at {MAX_EXPERTISE_LINES} line limit]*")
+                formatted = '\n'.join(formatted_lines)
+
+            logger.debug(
+                f"Formatted expertise for '{domain}': {len(formatted_lines)} lines, "
+                f"{len(formatted)} characters"
+            )
+
+            return formatted
+
+        except Exception as e:
+            logger.error(f"Failed to format expertise for domain '{domain}': {e}")
+            return ""
