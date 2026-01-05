@@ -1097,6 +1097,232 @@ async def save_env_config(project_id: str, payload: Dict[str, Any]):
 
 
 # =============================================================================
+# Expertise Endpoints
+# =============================================================================
+
+@app.get("/api/projects/{project_id}/expertise")
+async def list_expertise_domains(project_id: str):
+    """
+    List all expertise domains with summaries.
+
+    Returns:
+        List of expertise domains with metadata (domain, version, line_count, last_updated)
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            domains = await db.list_expertise_domains(project_uuid)
+            return domains
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to list expertise domains for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/expertise/{domain}")
+async def get_expertise_domain(project_id: str, domain: str):
+    """
+    Get full expertise for a specific domain.
+
+    Args:
+        project_id: Project UUID
+        domain: Domain name (database/api/frontend/testing/security/deployment/general)
+
+    Returns:
+        Expertise content with core_files, patterns, techniques, learnings
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            from core.learning.expertise_manager import ExpertiseManager
+
+            expertise_mgr = ExpertiseManager(project_uuid, db)
+            expertise = await expertise_mgr.get_expertise(domain)
+
+            if not expertise:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No expertise found for domain '{domain}'"
+                )
+
+            return {
+                "domain": expertise.domain,
+                "content": expertise.content,
+                "version": expertise.version,
+                "line_count": expertise.line_count,
+                "validated_at": expertise.validated_at.isoformat() if expertise.validated_at else None
+            }
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to get expertise for domain '{domain}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/expertise/{domain}/validate")
+async def validate_expertise_domain(project_id: str, domain: str):
+    """
+    Trigger validation for a specific domain's expertise.
+
+    Validates and prunes expertise by:
+    - Removing references to non-existent files
+    - Pruning old learnings (>6 months)
+    - Removing duplicate patterns/techniques
+
+    Args:
+        project_id: Project UUID
+        domain: Domain name
+
+    Returns:
+        Validation report with changes made
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            from core.learning.expertise_manager import ExpertiseManager
+
+            expertise_mgr = ExpertiseManager(project_uuid, db)
+            result = await expertise_mgr.validate_expertise(domain)
+
+            return result
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to validate expertise for domain '{domain}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/expertise/{domain}/improve")
+async def improve_expertise_domain(project_id: str, domain: str):
+    """
+    Trigger self-improvement scan for a specific domain's expertise.
+
+    Scans the codebase to discover:
+    - Relevant files for the domain
+    - Common patterns and conventions
+    - Library usage patterns
+    - Code style preferences
+
+    Args:
+        project_id: Project UUID
+        domain: Domain name
+
+    Returns:
+        Scan results and update summary
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            from core.learning.expertise_manager import ExpertiseManager
+
+            expertise_mgr = ExpertiseManager(project_uuid, db)
+            result = await expertise_mgr.self_improve(domain)
+
+            return result
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to improve expertise for domain '{domain}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/expertise/{domain}/history")
+async def get_expertise_history(project_id: str, domain: str):
+    """
+    Get update history for a specific domain's expertise.
+
+    Args:
+        project_id: Project UUID
+        domain: Domain name
+
+    Returns:
+        List of expertise updates (timestamp, change_type, summary, diff)
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            from core.learning.expertise_manager import ExpertiseManager
+
+            expertise_mgr = ExpertiseManager(project_uuid, db)
+            history = await expertise_mgr.get_expertise_history(domain)
+
+            return history
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to get expertise history for domain '{domain}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/projects/{project_id}/expertise/{domain}")
+async def update_expertise_domain(project_id: str, domain: str, payload: Dict[str, Any]):
+    """
+    Manually update expertise for a specific domain.
+
+    Args:
+        project_id: Project UUID
+        domain: Domain name
+        payload: Expertise content (core_files, patterns, techniques, learnings)
+
+    Returns:
+        Updated expertise metadata
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            from core.learning.expertise_manager import ExpertiseManager
+            import json
+
+            # Get content from payload
+            content = payload.get("content", {})
+
+            # Validate content structure
+            required_keys = {'core_files', 'patterns', 'techniques', 'learnings'}
+            if not all(key in content for key in required_keys):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Content must include: {', '.join(required_keys)}"
+                )
+
+            # Calculate line count
+            line_count = len(json.dumps(content, indent=2).split('\n'))
+
+            # Save to database
+            saved = await db.save_expertise(
+                project_uuid,
+                domain,
+                content,
+                line_count
+            )
+
+            # Record manual update in history (using 'self_improved' type for manual updates)
+            await db.record_expertise_update(
+                expertise_id=saved['id'],
+                session_id=None,
+                change_type='self_improved',
+                summary='Manual expertise update via API',
+                diff=json.dumps(content, indent=2)
+            )
+
+            return {
+                "status": "updated",
+                "domain": domain,
+                "version": saved['version'],
+                "line_count": line_count
+            }
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to update expertise for domain '{domain}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # Settings Endpoints
 # =============================================================================
 
