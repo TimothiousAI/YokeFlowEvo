@@ -1982,6 +1982,775 @@ class TaskDatabase:
             result['unreviewed_session_numbers'] = [row['session_number'] for row in unreviewed]
             return result
 
+    # =========================================================================
+    # Parallel Batch Operations
+    # =========================================================================
+
+    async def create_parallel_batch(
+        self,
+        project_id: UUID,
+        batch_number: int,
+        task_ids: List[int]
+    ) -> Dict[str, Any]:
+        """
+        Create a new parallel batch record.
+
+        Args:
+            project_id: Project UUID
+            batch_number: Sequential batch number
+            task_ids: List of task IDs in this batch
+
+        Returns:
+            Created batch record
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO parallel_batches
+                    (project_id, batch_number, task_ids, status)
+                    VALUES ($1, $2, $3, 'pending')
+                    RETURNING *
+                    """,
+                    project_id, batch_number, task_ids
+                )
+                logger.info(f"Created parallel batch {batch_number} for project {project_id} with {len(task_ids)} tasks")
+                return dict(row)
+        except Exception as e:
+            logger.error(f"Failed to create parallel batch: {e}")
+            raise
+
+    async def get_parallel_batch(self, batch_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get a single parallel batch by ID.
+
+        Args:
+            batch_id: Batch ID
+
+        Returns:
+            Batch record or None if not found
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM parallel_batches WHERE id = $1",
+                    batch_id
+                )
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get parallel batch {batch_id}: {e}")
+            raise
+
+    async def list_parallel_batches(self, project_id: UUID) -> List[Dict[str, Any]]:
+        """
+        List all parallel batches for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of batch records ordered by batch_number
+        """
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM parallel_batches
+                    WHERE project_id = $1
+                    ORDER BY batch_number
+                    """,
+                    project_id
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list parallel batches for project {project_id}: {e}")
+            raise
+
+    async def update_batch_status(
+        self,
+        batch_id: int,
+        status: str,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None
+    ) -> None:
+        """
+        Update parallel batch status.
+
+        Args:
+            batch_id: Batch ID
+            status: New status (pending/running/completed/failed/cancelled)
+            started_at: Optional timestamp when batch started
+            completed_at: Optional timestamp when batch completed
+        """
+        try:
+            async with self.acquire() as conn:
+                # Build dynamic query based on provided fields
+                updates = ["status = $2"]
+                params = [batch_id, status]
+                param_idx = 3
+
+                if started_at is not None:
+                    updates.append(f"started_at = ${param_idx}")
+                    params.append(started_at)
+                    param_idx += 1
+
+                if completed_at is not None:
+                    updates.append(f"completed_at = ${param_idx}")
+                    params.append(completed_at)
+                    param_idx += 1
+
+                query = f"""
+                    UPDATE parallel_batches
+                    SET {', '.join(updates)}
+                    WHERE id = $1
+                """
+
+                await conn.execute(query, *params)
+                logger.info(f"Updated batch {batch_id} status to {status}")
+        except Exception as e:
+            logger.error(f"Failed to update batch {batch_id} status: {e}")
+            raise
+
+    # =========================================================================
+    # Worktree Operations
+    # =========================================================================
+
+    async def create_worktree(
+        self,
+        project_id: UUID,
+        epic_id: int,
+        branch_name: str,
+        worktree_path: str
+    ) -> Dict[str, Any]:
+        """
+        Create a new worktree record.
+
+        Args:
+            project_id: Project UUID
+            epic_id: Epic ID this worktree is for
+            branch_name: Git branch name
+            worktree_path: Path to worktree directory
+
+        Returns:
+            Created worktree record
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO worktrees
+                    (project_id, epic_id, branch_name, worktree_path, status)
+                    VALUES ($1, $2, $3, $4, 'active')
+                    RETURNING *
+                    """,
+                    project_id, epic_id, branch_name, worktree_path
+                )
+                logger.info(f"Created worktree for epic {epic_id}: {branch_name} at {worktree_path}")
+                return dict(row)
+        except Exception as e:
+            logger.error(f"Failed to create worktree for epic {epic_id}: {e}")
+            raise
+
+    async def get_worktree(self, worktree_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get a single worktree by ID.
+
+        Args:
+            worktree_id: Worktree ID
+
+        Returns:
+            Worktree record or None if not found
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM worktrees WHERE id = $1",
+                    worktree_id
+                )
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get worktree {worktree_id}: {e}")
+            raise
+
+    async def get_worktree_by_epic(
+        self,
+        project_id: UUID,
+        epic_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get worktree for a specific epic.
+
+        Args:
+            project_id: Project UUID
+            epic_id: Epic ID
+
+        Returns:
+            Worktree record or None if not found
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT * FROM worktrees
+                    WHERE project_id = $1 AND epic_id = $2
+                    """,
+                    project_id, epic_id
+                )
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get worktree for epic {epic_id}: {e}")
+            raise
+
+    async def list_worktrees(self, project_id: UUID) -> List[Dict[str, Any]]:
+        """
+        List all worktrees for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of worktree records ordered by created_at
+        """
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM worktrees
+                    WHERE project_id = $1
+                    ORDER BY created_at DESC
+                    """,
+                    project_id
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list worktrees for project {project_id}: {e}")
+            raise
+
+    async def mark_worktree_merged(
+        self,
+        worktree_id: int,
+        merge_commit: str
+    ) -> None:
+        """
+        Mark worktree as merged with commit hash.
+
+        Args:
+            worktree_id: Worktree ID
+            merge_commit: SHA of the merge commit
+        """
+        try:
+            async with self.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE worktrees
+                    SET status = 'merged',
+                        merge_commit = $2,
+                        merged_at = NOW()
+                    WHERE id = $1
+                    """,
+                    worktree_id, merge_commit
+                )
+                logger.info(f"Marked worktree {worktree_id} as merged: {merge_commit}")
+        except Exception as e:
+            logger.error(f"Failed to mark worktree {worktree_id} as merged: {e}")
+            raise
+
+    async def delete_worktree(self, worktree_id: int) -> bool:
+        """
+        Delete a worktree record.
+
+        Args:
+            worktree_id: Worktree ID
+
+        Returns:
+            True if deleted successfully
+        """
+        try:
+            async with self.acquire() as conn:
+                result = await conn.execute(
+                    "DELETE FROM worktrees WHERE id = $1",
+                    worktree_id
+                )
+                deleted = result.split()[-1] != '0'
+                if deleted:
+                    logger.info(f"Deleted worktree {worktree_id}")
+                return deleted
+        except Exception as e:
+            logger.error(f"Failed to delete worktree {worktree_id}: {e}")
+            raise
+
+    # =========================================================================
+    # Agent Cost Tracking Operations
+    # =========================================================================
+
+    async def record_agent_cost(
+        self,
+        project_id: UUID,
+        session_id: Optional[UUID],
+        task_id: Optional[int],
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float
+    ) -> Dict[str, Any]:
+        """
+        Record agent execution cost.
+
+        Args:
+            project_id: Project UUID
+            session_id: Optional session UUID
+            task_id: Optional task ID
+            model: Model name (haiku/sonnet/opus)
+            input_tokens: Input token count
+            output_tokens: Output token count
+            cost_usd: Cost in USD
+
+        Returns:
+            Created cost record
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO agent_costs
+                    (project_id, session_id, task_id, model, input_tokens, output_tokens, cost_usd)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    RETURNING *
+                    """,
+                    project_id, session_id, task_id, model, input_tokens, output_tokens, cost_usd
+                )
+                logger.info(f"Recorded cost ${cost_usd:.4f} for {model} (task {task_id})")
+                return dict(row)
+        except Exception as e:
+            logger.error(f"Failed to record agent cost: {e}")
+            raise
+
+    async def get_project_costs(self, project_id: UUID) -> List[Dict[str, Any]]:
+        """
+        Get all cost records for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of cost records ordered by created_at
+        """
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM agent_costs
+                    WHERE project_id = $1
+                    ORDER BY created_at DESC
+                    """,
+                    project_id
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get project costs: {e}")
+            raise
+
+    async def get_cost_by_model(self, project_id: UUID) -> List[Dict[str, Any]]:
+        """
+        Get costs aggregated by model.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of aggregated costs by model from v_project_costs view
+        """
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM v_project_costs
+                    WHERE project_id = $1
+                    ORDER BY total_cost_usd DESC
+                    """,
+                    project_id
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get costs by model: {e}")
+            raise
+
+    async def get_session_cost(self, session_id: UUID) -> Dict[str, Any]:
+        """
+        Get total cost for a specific session.
+
+        Args:
+            session_id: Session UUID
+
+        Returns:
+            Dict with total_cost_usd, total_input_tokens, total_output_tokens
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT
+                        COALESCE(SUM(cost_usd), 0) as total_cost_usd,
+                        COALESCE(SUM(input_tokens), 0) as total_input_tokens,
+                        COALESCE(SUM(output_tokens), 0) as total_output_tokens,
+                        COUNT(*) as cost_entries
+                    FROM agent_costs
+                    WHERE session_id = $1
+                    """,
+                    session_id
+                )
+                return dict(row) if row else {
+                    'total_cost_usd': 0,
+                    'total_input_tokens': 0,
+                    'total_output_tokens': 0,
+                    'cost_entries': 0
+                }
+        except Exception as e:
+            logger.error(f"Failed to get session cost: {e}")
+            raise
+
+    async def get_total_cost(self, project_id: UUID) -> float:
+        """
+        Get total cost for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            Total cost in USD
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(SUM(cost_usd), 0) as total_cost
+                    FROM agent_costs
+                    WHERE project_id = $1
+                    """,
+                    project_id
+                )
+                return float(row['total_cost']) if row else 0.0
+        except Exception as e:
+            logger.error(f"Failed to get total cost: {e}")
+            raise
+
+    # =========================================================================
+    # Expertise Management Operations
+    # =========================================================================
+
+    async def get_expertise(
+        self,
+        project_id: UUID,
+        domain: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get expertise file for a specific domain.
+
+        Args:
+            project_id: Project UUID
+            domain: Expertise domain (database/api/frontend/testing/security/deployment/general)
+
+        Returns:
+            Expertise record or None if not found
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT * FROM expertise_files
+                    WHERE project_id = $1 AND domain = $2
+                    """,
+                    project_id, domain
+                )
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get expertise for domain {domain}: {e}")
+            raise
+
+    async def save_expertise(
+        self,
+        project_id: UUID,
+        domain: str,
+        content: Dict[str, Any],
+        line_count: int
+    ) -> Dict[str, Any]:
+        """
+        Save or update expertise file.
+
+        Args:
+            project_id: Project UUID
+            domain: Expertise domain
+            content: JSONB content (core_files, patterns, techniques, learnings)
+            line_count: Approximate line count
+
+        Returns:
+            Created or updated expertise record
+        """
+        try:
+            async with self.acquire() as conn:
+                # Use INSERT ... ON CONFLICT to handle upsert
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO expertise_files
+                    (project_id, domain, content, line_count, version)
+                    VALUES ($1, $2, $3, $4, 1)
+                    ON CONFLICT (project_id, domain)
+                    DO UPDATE SET
+                        content = $3,
+                        line_count = $4,
+                        version = expertise_files.version + 1,
+                        updated_at = NOW()
+                    RETURNING *
+                    """,
+                    project_id, domain, json.dumps(content), line_count
+                )
+                logger.info(f"Saved expertise for domain {domain} (version {row['version']}, {line_count} lines)")
+                return dict(row)
+        except Exception as e:
+            logger.error(f"Failed to save expertise for domain {domain}: {e}")
+            raise
+
+    async def list_expertise_domains(self, project_id: UUID) -> List[Dict[str, Any]]:
+        """
+        List all expertise domains for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of expertise records with summary info
+        """
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        id,
+                        domain,
+                        version,
+                        line_count,
+                        validated_at,
+                        created_at,
+                        updated_at
+                    FROM expertise_files
+                    WHERE project_id = $1
+                    ORDER BY domain
+                    """,
+                    project_id
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list expertise domains: {e}")
+            raise
+
+    async def record_expertise_update(
+        self,
+        expertise_id: int,
+        session_id: Optional[UUID],
+        change_type: str,
+        summary: str,
+        diff: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Record an expertise update for audit trail.
+
+        Args:
+            expertise_id: Expertise file ID
+            session_id: Optional session UUID
+            change_type: Type of change (learned/validated/pruned/self_improved)
+            summary: Summary of changes
+            diff: Optional diff text
+
+        Returns:
+            Created update record
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO expertise_updates
+                    (expertise_id, session_id, change_type, summary, diff)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING *
+                    """,
+                    expertise_id, session_id, change_type, summary, diff
+                )
+                logger.info(f"Recorded expertise update: {change_type} - {summary}")
+                return dict(row)
+        except Exception as e:
+            logger.error(f"Failed to record expertise update: {e}")
+            raise
+
+    async def get_expertise_history(self, expertise_id: int) -> List[Dict[str, Any]]:
+        """
+        Get update history for an expertise file.
+
+        Args:
+            expertise_id: Expertise file ID
+
+        Returns:
+            List of update records ordered by created_at
+        """
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM expertise_updates
+                    WHERE expertise_id = $1
+                    ORDER BY created_at DESC
+                    """,
+                    expertise_id
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get expertise history: {e}")
+            raise
+
+    # =========================================================================
+    # Dependency Management Operations
+    # =========================================================================
+
+    async def get_task_dependencies(self, task_id: int) -> Dict[str, Any]:
+        """
+        Get dependencies for a task.
+
+        Args:
+            task_id: Task ID
+
+        Returns:
+            Dict with depends_on array and dependency_type
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT depends_on, dependency_type
+                    FROM tasks
+                    WHERE id = $1
+                    """,
+                    task_id
+                )
+                return dict(row) if row else {'depends_on': [], 'dependency_type': 'hard'}
+        except Exception as e:
+            logger.error(f"Failed to get task dependencies for task {task_id}: {e}")
+            raise
+
+    async def set_task_dependencies(
+        self,
+        task_id: int,
+        depends_on: List[int],
+        dependency_type: str = 'hard'
+    ) -> None:
+        """
+        Set dependencies for a task.
+
+        Args:
+            task_id: Task ID
+            depends_on: List of task IDs this task depends on
+            dependency_type: 'hard' (blocking) or 'soft' (non-blocking)
+        """
+        try:
+            async with self.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE tasks
+                    SET depends_on = $2, dependency_type = $3
+                    WHERE id = $1
+                    """,
+                    task_id, depends_on, dependency_type
+                )
+                logger.info(f"Set dependencies for task {task_id}: {depends_on} ({dependency_type})")
+        except Exception as e:
+            logger.error(f"Failed to set task dependencies: {e}")
+            raise
+
+    async def get_tasks_with_dependencies(self, project_id: UUID) -> List[Dict[str, Any]]:
+        """
+        Get all tasks with their dependencies for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of tasks with id, description, depends_on, dependency_type, epic_id
+        """
+        try:
+            async with self.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        t.id,
+                        t.epic_id,
+                        t.description,
+                        t.depends_on,
+                        t.dependency_type,
+                        t.priority,
+                        t.done,
+                        e.name as epic_name
+                    FROM tasks t
+                    JOIN epics e ON t.epic_id = e.id
+                    WHERE t.project_id = $1
+                    ORDER BY t.epic_id, t.priority, t.id
+                    """,
+                    project_id
+                )
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get tasks with dependencies: {e}")
+            raise
+
+    async def get_epic_dependencies(self, epic_id: int) -> List[int]:
+        """
+        Get dependencies for an epic.
+
+        Args:
+            epic_id: Epic ID
+
+        Returns:
+            List of epic IDs this epic depends on
+        """
+        try:
+            async with self.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT depends_on
+                    FROM epics
+                    WHERE id = $1
+                    """,
+                    epic_id
+                )
+                return row['depends_on'] if row and row['depends_on'] else []
+        except Exception as e:
+            logger.error(f"Failed to get epic dependencies for epic {epic_id}: {e}")
+            raise
+
+    async def set_epic_dependencies(
+        self,
+        epic_id: int,
+        depends_on: List[int]
+    ) -> None:
+        """
+        Set dependencies for an epic.
+
+        Args:
+            epic_id: Epic ID
+            depends_on: List of epic IDs this epic depends on
+        """
+        try:
+            async with self.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE epics
+                    SET depends_on = $2
+                    WHERE id = $1
+                    """,
+                    epic_id, depends_on
+                )
+                logger.info(f"Set dependencies for epic {epic_id}: {depends_on}")
+        except Exception as e:
+            logger.error(f"Failed to set epic dependencies: {e}")
+            raise
+
 
 # =============================================================================
 # Factory function for compatibility

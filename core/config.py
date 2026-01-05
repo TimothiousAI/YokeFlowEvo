@@ -109,6 +109,59 @@ class InterventionConfig:
 
 
 @dataclass
+class ParallelConfig:
+    """Configuration for parallel execution."""
+    enabled: bool = False  # Enable parallel task execution
+    max_concurrency: int = 3  # Maximum concurrent agents (1-10)
+    strategy: str = "dependency"  # Execution strategy: "dependency" or "priority"
+    worktree_dir: str = ".worktrees"  # Directory for git worktrees
+    merge_strategy: str = "regular"  # Merge strategy: "regular" or "squash"
+
+    def __post_init__(self):
+        """Validate configuration values."""
+        if not 1 <= self.max_concurrency <= 10:
+            raise ValueError("max_concurrency must be between 1 and 10")
+        if self.strategy not in ("dependency", "priority"):
+            raise ValueError("strategy must be 'dependency' or 'priority'")
+        if self.merge_strategy not in ("regular", "squash"):
+            raise ValueError("merge_strategy must be 'regular' or 'squash'")
+
+
+@dataclass
+class LearningConfig:
+    """Configuration for self-learning system."""
+    enabled: bool = False  # Enable expertise accumulation
+    expertise_max_lines: int = 1000  # Maximum lines per expertise file
+    self_improve_interval: int = 5  # Run self-improvement every N sessions
+    domains: List[str] = field(default_factory=lambda: [
+        "database", "api", "frontend", "testing", "security", "deployment", "general"
+    ])
+
+    def __post_init__(self):
+        """Validate configuration values."""
+        if self.expertise_max_lines < 100:
+            raise ValueError("expertise_max_lines must be at least 100")
+        if self.self_improve_interval < 1:
+            raise ValueError("self_improve_interval must be at least 1")
+
+
+@dataclass
+class CostConfig:
+    """Configuration for cost optimization."""
+    budget_limit_usd: Optional[float] = None  # Maximum spend per project (None = unlimited)
+    optimization_enabled: bool = False  # Enable model selection optimization
+    default_model: str = "sonnet"  # Default model: "haiku", "sonnet", or "opus"
+    model_overrides: dict = field(default_factory=dict)  # Task type -> model overrides
+
+    def __post_init__(self):
+        """Validate configuration values."""
+        if self.budget_limit_usd is not None and self.budget_limit_usd <= 0:
+            raise ValueError("budget_limit_usd must be positive")
+        if self.default_model not in ("haiku", "sonnet", "opus"):
+            raise ValueError("default_model must be 'haiku', 'sonnet', or 'opus'")
+
+
+@dataclass
 class Config:
     """Main configuration class."""
     models: ModelConfig = field(default_factory=ModelConfig)
@@ -119,6 +172,9 @@ class Config:
     review: ReviewConfig = field(default_factory=ReviewConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     intervention: InterventionConfig = field(default_factory=InterventionConfig)
+    parallel: ParallelConfig = field(default_factory=ParallelConfig)
+    learning: LearningConfig = field(default_factory=LearningConfig)
+    cost: CostConfig = field(default_factory=CostConfig)
 
     @classmethod
     def load_from_file(cls, config_path: Path) -> 'Config':
