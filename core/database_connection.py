@@ -255,7 +255,7 @@ if __name__ == "__main__":
             print("\nAttempting to connect to PostgreSQL...")
             try:
                 db = await get_db()
-                print("✅ Successfully connected to PostgreSQL!")
+                print("[OK] Successfully connected to PostgreSQL!")
 
                 # Test a simple query
                 async with db.acquire() as conn:
@@ -263,10 +263,10 @@ if __name__ == "__main__":
                     print(f"PostgreSQL version: {version[:50]}...")
 
                 await db.disconnect()
-                print("✅ Successfully disconnected")
+                print("[OK] Successfully disconnected")
             except Exception as e:
-                print(f"❌ Connection failed: {e}")
+                print(f"[X] Connection failed: {e}")
         else:
-            print(f"\n❌ Error: {info.get('error', 'Unknown error')}")
+            print(f"\n[X] Error: {info.get('error', 'Unknown error')}")
 
     asyncio.run(test())

@@ -582,13 +582,13 @@ You are executing in an **isolated git worktree** for parallel development:
         file_paths = list(set(file_paths))
 
         if file_paths:
-            prompt += "## 📁 Files to Modify\n\n"
+            prompt += "## Files to Modify\n\n"
             for file_path in file_paths:
                 prompt += f"- `{file_path}`\n"
             prompt += "\n"
 
         # Add coding guidelines and verification requirements
-        prompt += """## ✅ Coding Guidelines
+        prompt += """## Coding Guidelines
 
 **Code Quality:**
 - Follow PEP 8 style guide for Python code
