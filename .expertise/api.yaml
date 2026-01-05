@@ -1,0 +1,32 @@
+domain: api
+overview: "FastAPI REST API with WebSocket support. Async handlers, background tasks for long-running operations."
+
+core_files:
+  - api/main.py
+  - web-ui/src/lib/api.ts
+  - mcp-task-manager/src/index.ts
+
+patterns:
+  - "Use BackgroundTasks for session execution (non-blocking)"
+  - "WebSocket at /ws/{project_id} for real-time updates"
+  - "running_sessions dict tracks active background tasks"
+  - "UUID path parameters for project_id"
+  - "Consistent response format: {data: ..., error: ...}"
+
+best_practices:
+  - "Use asyncio.create_task() for background execution"
+  - "Emit WebSocket events for state changes"
+  - "Return 202 Accepted for async operations"
+  - "Include request validation with Pydantic"
+  - "Handle race conditions for session creation"
+
+learned_from_failures:
+  - issue: "Double session creation from rapid clicks"
+    solution: "Check running_sessions before creating new task"
+  - issue: "WebSocket disconnect during long operations"
+    solution: "Reconnection logic in frontend, state persists in DB"
+
+effective_patterns:
+  - "Read api/main.py endpoints -> understand routes -> add new endpoints"
+  - "Mirror endpoint structure in web-ui/src/lib/api.ts"
+  - "Use same event names for WebSocket as API endpoint names"

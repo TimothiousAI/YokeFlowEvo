@@ -538,6 +538,7 @@ async def create_project(
     sandbox_type: str = Form("docker"),
     initializer_model: Optional[str] = Form(None),
     coding_model: Optional[str] = Form(None),
+    local_path: Optional[str] = Form(None),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -549,6 +550,11 @@ async def create_project(
 
     For multiple files, they will be saved to a spec/ directory and
     the primary file will be auto-detected.
+
+    Enhancement Mode:
+    - If local_path is provided, the project targets an existing codebase
+    - The directory must exist and contain app_spec.txt
+    - Useful for self-enhancement via git worktrees
     """
     try:
         # Validate project name format
@@ -582,6 +588,7 @@ async def create_project(
             sandbox_type=sandbox_type,
             initializer_model=initializer_model,
             coding_model=coding_model,
+            local_path=local_path,  # Enhancement mode: use existing directory
         )
 
         # Convert for response
