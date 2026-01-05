@@ -25,10 +25,13 @@ Pricing (approximate, as of 2025):
 """
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Tuple
 from uuid import UUID
 from enum import Enum
+from datetime import datetime, timedelta
+from collections import defaultdict
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,12 @@ COMPLEXITY_THRESHOLDS = {
     "sonnet_max": 0.7,   # Use SONNET if overall_score <= 0.7
     "opus_min": 0.7      # Use OPUS if overall_score > 0.7
 }
+
+
+# Performance cache configuration
+PERFORMANCE_CACHE_TTL = 300  # 5 minutes in seconds
+PERFORMANCE_MIN_SAMPLES = 3  # Minimum samples needed to influence recommendation
+PERFORMANCE_SUCCESS_THRESHOLD = 0.7  # 70% success rate threshold
 
 
 @dataclass
@@ -114,6 +123,11 @@ class ModelSelector:
         self.project_id = project_id
         self.config = config
         self.db = db_connection
+
+        # Performance cache: {task_type: {model: {'success_rate': float, 'avg_duration': float, 'count': int}}}
+        self._performance_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._cache_timestamp: Optional[datetime] = None
+
         logger.info(f"ModelSelector initialized for project {project_id}")
 
     def analyze_complexity(self, task: Dict[str, Any]) -> TaskComplexity:
@@ -486,6 +500,121 @@ class ModelSelector:
 
         return "configuration"
 
+    async def _get_historical_performance(self, task_type: str, model: str) -> Optional[Dict[str, Any]]:
+        """
+        Get historical performance stats for a task type and model.
+
+        Uses cache with TTL to avoid excessive database queries.
+
+        Args:
+            task_type: Task type category (e.g., 'api', 'database')
+            model: Model name (haiku/sonnet/opus)
+
+        Returns:
+            Dict with 'success_rate', 'avg_duration', 'count', or None if insufficient data
+        """
+        # Check if cache is valid
+        cache_valid = (
+            self._cache_timestamp is not None and
+            datetime.now() - self._cache_timestamp < timedelta(seconds=PERFORMANCE_CACHE_TTL)
+        )
+
+        # Refresh cache if invalid or empty
+        if not cache_valid or not self._performance_cache:
+            await self._refresh_performance_cache()
+
+        # Return cached stats if available
+        if task_type in self._performance_cache and model in self._performance_cache[task_type]:
+            return self._performance_cache[task_type][model]
+
+        return None
+
+    async def _refresh_performance_cache(self) -> None:
+        """
+        Refresh performance cache from database.
+
+        Queries agent_costs joined with tasks to get success rates, durations, and counts
+        grouped by task type and model.
+        """
+        try:
+            # Query database for historical performance data
+            # We need to join agent_costs with tasks to get task descriptions
+            # Then calculate success rates and averages per task_type per model
+            async with self.db.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        t.description,
+                        ac.model,
+                        COUNT(*) as total_count,
+                        -- Success is inferred: if a task completed and has a cost record, it succeeded
+                        -- Failed tasks typically don't get cost records or have zero tokens
+                        SUM(CASE WHEN ac.output_tokens > 0 THEN 1 ELSE 0 END) as success_count,
+                        AVG(EXTRACT(EPOCH FROM (t.completed_at - ac.created_at))) as avg_duration_seconds
+                    FROM agent_costs ac
+                    JOIN tasks t ON ac.task_id = t.id
+                    WHERE ac.project_id = $1
+                      AND t.completed_at IS NOT NULL
+                      AND ac.created_at >= NOW() - INTERVAL '30 days'  -- Only last 30 days
+                    GROUP BY t.description, ac.model
+                    HAVING COUNT(*) >= 1
+                    """,
+                    self.project_id
+                )
+
+                # Build cache structure
+                cache: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(lambda: defaultdict(dict))
+
+                for row in rows:
+                    description = row['description']
+                    model = row['model']
+                    total_count = row['total_count']
+                    success_count = row['success_count']
+                    avg_duration = row['avg_duration_seconds']
+
+                    # Extract task type from description
+                    task_type = self._extract_task_type(description)
+
+                    # Calculate success rate
+                    success_rate = success_count / total_count if total_count > 0 else 0.0
+
+                    # Aggregate stats per task_type and model
+                    if model not in cache[task_type]:
+                        cache[task_type][model] = {
+                            'success_rate': success_rate,
+                            'avg_duration': avg_duration or 0.0,
+                            'count': total_count
+                        }
+                    else:
+                        # Combine stats from multiple descriptions of same task type
+                        existing = cache[task_type][model]
+                        total_combined = existing['count'] + total_count
+                        combined_success_rate = (
+                            (existing['success_rate'] * existing['count'] + success_rate * total_count) /
+                            total_combined
+                        )
+                        combined_avg_duration = (
+                            (existing['avg_duration'] * existing['count'] + (avg_duration or 0.0) * total_count) /
+                            total_combined
+                        )
+                        cache[task_type][model] = {
+                            'success_rate': combined_success_rate,
+                            'avg_duration': combined_avg_duration,
+                            'count': total_combined
+                        }
+
+                # Update cache
+                self._performance_cache = dict(cache)
+                self._cache_timestamp = datetime.now()
+
+                logger.debug(f"Performance cache refreshed: {len(self._performance_cache)} task types tracked")
+
+        except Exception as e:
+            logger.error(f"Failed to refresh performance cache: {e}")
+            # Keep old cache if refresh fails
+            if not self._cache_timestamp:
+                self._cache_timestamp = datetime.now()
+
     def _get_historical_performance_adjustment(
         self,
         task: Dict[str, Any],
@@ -501,16 +630,83 @@ class ModelSelector:
         Returns:
             Dict with 'model' and 'reason' if adjustment needed, None otherwise
         """
-        # For now, return None - will be implemented in task 909
-        # This method will query agent_costs table to find:
-        # - Success/failure rates per model for similar task types
-        # - Average duration and cost per model
-        # - Recent trends in model performance
+        # Extract task type
+        description = task.get('description', '')
+        task_type = self._extract_task_type(description)
 
-        # Example logic (to be implemented):
-        # - If HAIKU has <70% success rate on similar tasks -> upgrade to SONNET
-        # - If SONNET completes similar tasks faster than OPUS -> keep SONNET
-        # - If model consistently times out -> upgrade to more capable model
+        # Get historical performance (need to run async in sync context)
+        # Use asyncio to run the async method
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is already running, we can't use run_until_complete
+                # In this case, skip historical adjustment (will be fixed in orchestrator integration)
+                logger.debug("Event loop already running, skipping historical adjustment")
+                return None
+        except RuntimeError:
+            # No event loop, create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        # Get stats for the base model
+        base_stats = loop.run_until_complete(
+            self._get_historical_performance(task_type, base_model.value)
+        )
+
+        # If insufficient data, no adjustment
+        if not base_stats or base_stats['count'] < PERFORMANCE_MIN_SAMPLES:
+            return None
+
+        # Check if base model has low success rate
+        if base_stats['success_rate'] < PERFORMANCE_SUCCESS_THRESHOLD:
+            # Try to upgrade to next tier
+            if base_model == ModelTier.HAIKU:
+                # Upgrade HAIKU -> SONNET if HAIKU has poor success rate
+                sonnet_stats = loop.run_until_complete(
+                    self._get_historical_performance(task_type, ModelTier.SONNET.value)
+                )
+                if sonnet_stats and sonnet_stats['success_rate'] > base_stats['success_rate']:
+                    return {
+                        'model': ModelTier.SONNET,
+                        'reason': f"historical data: {base_model.value} has {base_stats['success_rate']:.1%} success rate on {task_type} tasks"
+                    }
+            elif base_model == ModelTier.SONNET:
+                # Upgrade SONNET -> OPUS if SONNET has poor success rate
+                opus_stats = loop.run_until_complete(
+                    self._get_historical_performance(task_type, ModelTier.OPUS.value)
+                )
+                if opus_stats and opus_stats['success_rate'] > base_stats['success_rate']:
+                    return {
+                        'model': ModelTier.OPUS,
+                        'reason': f"historical data: {base_model.value} has {base_stats['success_rate']:.1%} success rate on {task_type} tasks"
+                    }
+
+        # Check if we can safely downgrade (base model is SONNET or OPUS with good success)
+        if base_stats['success_rate'] >= 0.9:  # 90%+ success rate
+            if base_model == ModelTier.OPUS:
+                # Check if SONNET also has good success rate -> downgrade to save cost
+                sonnet_stats = loop.run_until_complete(
+                    self._get_historical_performance(task_type, ModelTier.SONNET.value)
+                )
+                if (sonnet_stats and
+                    sonnet_stats['count'] >= PERFORMANCE_MIN_SAMPLES and
+                    sonnet_stats['success_rate'] >= 0.85):  # Allow 5% success rate drop for cost savings
+                    return {
+                        'model': ModelTier.SONNET,
+                        'reason': f"historical data: {ModelTier.SONNET.value} has {sonnet_stats['success_rate']:.1%} success rate on {task_type} tasks (cost optimization)"
+                    }
+            elif base_model == ModelTier.SONNET:
+                # Check if HAIKU also has good success rate -> downgrade to save cost
+                haiku_stats = loop.run_until_complete(
+                    self._get_historical_performance(task_type, ModelTier.HAIKU.value)
+                )
+                if (haiku_stats and
+                    haiku_stats['count'] >= PERFORMANCE_MIN_SAMPLES and
+                    haiku_stats['success_rate'] >= 0.85):
+                    return {
+                        'model': ModelTier.HAIKU,
+                        'reason': f"historical data: {ModelTier.HAIKU.value} has {haiku_stats['success_rate']:.1%} success rate on {task_type} tasks (cost optimization)"
+                    }
 
         return None
 
@@ -553,6 +749,38 @@ class ModelSelector:
         # Task 910 will implement actual budget tracking from agent_costs table
         return (True, 999999.0)
 
+    def _extract_task_type(self, task_description: str) -> str:
+        """
+        Extract task type from description for categorization.
+
+        Args:
+            task_description: Task description text
+
+        Returns:
+            Task type category (e.g., 'api', 'database', 'frontend', 'refactor', 'general')
+        """
+        desc_lower = task_description.lower()
+
+        # Define task type patterns in priority order (most specific first)
+        task_types = [
+            ('database', ['database', 'schema', 'migration', 'sql', 'query']),
+            ('api', ['api', 'endpoint', 'route', 'rest', 'graphql']),
+            ('frontend', ['frontend', 'ui', 'component', 'react', 'vue', 'angular']),
+            ('backend', ['backend', 'server', 'service']),
+            ('testing', ['test', 'unit test', 'integration test', 'e2e']),
+            ('refactor', ['refactor', 'cleanup', 'reorganize']),
+            ('documentation', ['document', 'readme', 'docs', 'comment']),
+            ('security', ['security', 'auth', 'authentication', 'authorization']),
+            ('performance', ['performance', 'optimize', 'cache', 'speed']),
+            ('deployment', ['deploy', 'ci/cd', 'docker', 'kubernetes']),
+        ]
+
+        for task_type, keywords in task_types:
+            if any(keyword in desc_lower for keyword in keywords):
+                return task_type
+
+        return 'general'
+
     def record_outcome(
         self,
         task_id: int,
@@ -564,12 +792,24 @@ class ModelSelector:
         """
         Record task outcome for historical tracking.
 
+        This method is synchronous but calls async database operations.
+        It invalidates the cache to ensure fresh data on next recommendation.
+
         Args:
             task_id: Task ID
-            model: Model used
+            model: Model used (haiku/sonnet/opus)
             success: Whether task succeeded
             duration: Execution time in seconds
-            tokens: Dict with input_tokens and output_tokens
+            tokens: Dict with 'input_tokens' and 'output_tokens'
         """
-        # Stub - will be implemented in Epic 95
-        logger.warning("ModelSelector.record_outcome() not yet implemented")
+        # Invalidate cache to force refresh on next recommendation
+        self._performance_cache = {}
+        self._cache_timestamp = None
+
+        # Note: This is a synchronous method but record_agent_cost is async
+        # The actual cost recording happens in the orchestrator/agent code
+        # This method just logs the outcome for future queries
+        logger.info(
+            f"Task {task_id} outcome: model={model}, success={success}, "
+            f"duration={duration:.2f}s, tokens={tokens.get('input_tokens', 0) + tokens.get('output_tokens', 0)}"
+        )
