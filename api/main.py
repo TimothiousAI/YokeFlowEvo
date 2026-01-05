@@ -305,7 +305,7 @@ async def startup_event():
                 # This provides fast UX feedback (within seconds) when server restarts
                 cleaned = await cleanup_orphaned_sessions(db)
                 if cleaned > 0:
-                    logger.info(f"✓ Cleaned up {cleaned} orphaned session(s) from previous server instance")
+                    logger.info(f"[OK] Cleaned up {cleaned} orphaned session(s) from previous server instance")
         except Exception as e:
             logger.error(f"Failed to connect to PostgreSQL: {e}")
 
@@ -972,6 +972,339 @@ async def get_epic_detail(project_id: str, epic_id: int):
     except Exception as e:
         logger.error(f"Failed to get epic {epic_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/costs")
+async def get_project_costs(
+    project_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    model: Optional[str] = None,
+    task_type: Optional[str] = None
+):
+    """
+    Get detailed cost breakdown for a project.
+
+    Args:
+        project_id: Project UUID
+        start_date: Optional start date filter (ISO format)
+        end_date: Optional end date filter (ISO format)
+        model: Optional model filter (haiku/sonnet/opus)
+        task_type: Optional task type filter
+
+    Returns:
+        Cost breakdown grouped by model, task type, and date
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            async with db.pool.acquire() as conn:
+                # Build WHERE clause based on filters
+                where_clauses = ["ac.project_id = $1"]
+                params = [project_uuid]
+                param_idx = 2
+
+                if start_date:
+                    where_clauses.append(f"ac.created_at >= ${param_idx}")
+                    params.append(start_date)
+                    param_idx += 1
+
+                if end_date:
+                    where_clauses.append(f"ac.created_at <= ${param_idx}")
+                    params.append(end_date)
+                    param_idx += 1
+
+                if model:
+                    where_clauses.append(f"ac.model = ${param_idx}")
+                    params.append(model)
+                    param_idx += 1
+
+                where_sql = " AND ".join(where_clauses)
+
+                # Query costs with grouping
+                query = f"""
+                    SELECT
+                        ac.model,
+                        DATE(ac.created_at) as date,
+                        t.description,
+                        COUNT(*) as task_count,
+                        SUM(ac.cost_usd) as total_cost,
+                        SUM(ac.input_tokens) as total_input_tokens,
+                        SUM(ac.output_tokens) as total_output_tokens,
+                        AVG(ac.cost_usd) as avg_cost_per_task
+                    FROM agent_costs ac
+                    LEFT JOIN tasks t ON ac.task_id = t.id
+                    WHERE {where_sql}
+                    GROUP BY ac.model, DATE(ac.created_at), t.description
+                    ORDER BY date DESC, ac.model
+                """
+
+                rows = await conn.fetch(query, *params)
+
+                # Process results and extract task types
+                costs_by_model = {}
+                costs_by_date = {}
+                costs_by_task_type = {}
+
+                for row in rows:
+                    model_name = row['model']
+                    date_str = str(row['date'])
+                    description = row['description'] or 'unknown'
+
+                    # Extract task type from description (simple categorization)
+                    task_type_extracted = extract_task_type_from_description(description)
+
+                    # Apply task_type filter if provided
+                    if task_type and task_type.lower() != task_type_extracted.lower():
+                        continue
+
+                    cost_data = {
+                        'task_count': row['task_count'],
+                        'total_cost': float(row['total_cost']),
+                        'total_input_tokens': row['total_input_tokens'],
+                        'total_output_tokens': row['total_output_tokens'],
+                        'avg_cost_per_task': float(row['avg_cost_per_task'])
+                    }
+
+                    # Group by model
+                    if model_name not in costs_by_model:
+                        costs_by_model[model_name] = {
+                            'total_cost': 0.0,
+                            'task_count': 0,
+                            'total_tokens': 0
+                        }
+                    costs_by_model[model_name]['total_cost'] += cost_data['total_cost']
+                    costs_by_model[model_name]['task_count'] += cost_data['task_count']
+                    costs_by_model[model_name]['total_tokens'] += (
+                        cost_data['total_input_tokens'] + cost_data['total_output_tokens']
+                    )
+
+                    # Group by date
+                    if date_str not in costs_by_date:
+                        costs_by_date[date_str] = {'total_cost': 0.0, 'task_count': 0}
+                    costs_by_date[date_str]['total_cost'] += cost_data['total_cost']
+                    costs_by_date[date_str]['task_count'] += cost_data['task_count']
+
+                    # Group by task type
+                    if task_type_extracted not in costs_by_task_type:
+                        costs_by_task_type[task_type_extracted] = {'total_cost': 0.0, 'task_count': 0}
+                    costs_by_task_type[task_type_extracted]['total_cost'] += cost_data['total_cost']
+                    costs_by_task_type[task_type_extracted]['task_count'] += cost_data['task_count']
+
+                return {
+                    'by_model': costs_by_model,
+                    'by_date': costs_by_date,
+                    'by_task_type': costs_by_task_type
+                }
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to get costs for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/costs/summary")
+async def get_project_costs_summary(project_id: str):
+    """
+    Get cost summary for a project.
+
+    Returns total spent and budget remaining.
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            async with db.pool.acquire() as conn:
+                # Get total spent
+                result = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(SUM(cost_usd), 0) as total_spent
+                    FROM agent_costs
+                    WHERE project_id = $1
+                    """,
+                    project_uuid
+                )
+
+                total_spent = float(result['total_spent'])
+
+                # Get budget limit from project config (if available)
+                # For now, return unlimited budget
+                budget_limit = None  # TODO: Load from project config
+                budget_remaining = None if budget_limit is None else (budget_limit - total_spent)
+
+                return {
+                    'total_spent': total_spent,
+                    'budget_limit': budget_limit,
+                    'budget_remaining': budget_remaining,
+                    'budget_used_pct': None if budget_limit is None else (total_spent / budget_limit * 100)
+                }
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to get cost summary for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/costs/forecast")
+async def get_project_costs_forecast(project_id: str):
+    """
+    Get cost forecast for a project.
+
+    Estimates remaining cost based on incomplete tasks and historical averages.
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            async with db.pool.acquire() as conn:
+                # Get total spent so far
+                spent_result = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(SUM(cost_usd), 0) as total_spent
+                    FROM agent_costs
+                    WHERE project_id = $1
+                    """,
+                    project_uuid
+                )
+                total_spent = float(spent_result['total_spent'])
+
+                # Get completed task count
+                completed_result = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*) as completed_count
+                    FROM tasks
+                    WHERE project_id = $1 AND done = true
+                    """,
+                    project_uuid
+                )
+                completed_count = completed_result['completed_count']
+
+                # Get total task count
+                total_result = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*) as total_count
+                    FROM tasks
+                    WHERE project_id = $1
+                    """,
+                    project_uuid
+                )
+                total_count = total_result['total_count']
+
+                # Calculate forecast
+                remaining_count = total_count - completed_count
+
+                if completed_count > 0:
+                    avg_cost_per_task = total_spent / completed_count
+                    estimated_remaining = avg_cost_per_task * remaining_count
+                    estimated_total = total_spent + estimated_remaining
+                else:
+                    # No completed tasks yet - use default estimate
+                    avg_cost_per_task = 0.5  # $0.50 per task default
+                    estimated_remaining = avg_cost_per_task * total_count
+                    estimated_total = estimated_remaining
+
+                return {
+                    'total_spent': total_spent,
+                    'completed_tasks': completed_count,
+                    'remaining_tasks': remaining_count,
+                    'avg_cost_per_task': avg_cost_per_task,
+                    'estimated_remaining': estimated_remaining,
+                    'estimated_total': estimated_total
+                }
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to get cost forecast for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/model-stats")
+async def get_project_model_stats(project_id: str):
+    """
+    Get model performance statistics for a project.
+
+    Returns success rate and average duration by model.
+    """
+    try:
+        project_uuid = UUID(project_id)
+        async with DatabaseManager() as db:
+            async with db.pool.acquire() as conn:
+                # Query model statistics
+                query = """
+                    SELECT
+                        ac.model,
+                        COUNT(*) as total_tasks,
+                        SUM(CASE WHEN t.done = true THEN 1 ELSE 0 END) as successful_tasks,
+                        AVG(CASE
+                            WHEN t.completed_at IS NOT NULL AND ac.created_at IS NOT NULL
+                            THEN EXTRACT(EPOCH FROM (t.completed_at - ac.created_at))
+                            ELSE NULL
+                        END) as avg_duration_seconds,
+                        SUM(ac.cost_usd) as total_cost,
+                        AVG(ac.cost_usd) as avg_cost
+                    FROM agent_costs ac
+                    LEFT JOIN tasks t ON ac.task_id = t.id
+                    WHERE ac.project_id = $1
+                    GROUP BY ac.model
+                    ORDER BY ac.model
+                """
+
+                rows = await conn.fetch(query, project_uuid)
+
+                stats = {}
+                for row in rows:
+                    model = row['model']
+                    total = row['total_tasks']
+                    successful = row['successful_tasks']
+                    success_rate = (successful / total * 100) if total > 0 else 0.0
+
+                    stats[model] = {
+                        'total_tasks': total,
+                        'successful_tasks': successful,
+                        'success_rate': success_rate,
+                        'avg_duration_seconds': float(row['avg_duration_seconds']) if row['avg_duration_seconds'] else 0.0,
+                        'total_cost': float(row['total_cost']),
+                        'avg_cost': float(row['avg_cost'])
+                    }
+
+                return stats
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project ID")
+    except Exception as e:
+        logger.error(f"Failed to get model stats for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def extract_task_type_from_description(description: str) -> str:
+    """
+    Extract task type category from task description.
+
+    Args:
+        description: Task description text
+
+    Returns:
+        Task type category (e.g., 'api', 'database', 'frontend', 'testing', 'general')
+    """
+    desc_lower = description.lower()
+
+    # Define task type patterns (same as in ModelSelector)
+    task_types = [
+        ('database', ['database', 'schema', 'migration', 'sql', 'query']),
+        ('api', ['api', 'endpoint', 'route', 'rest', 'graphql']),
+        ('frontend', ['frontend', 'ui', 'component', 'react', 'vue', 'angular']),
+        ('backend', ['backend', 'server', 'service']),
+        ('testing', ['test', 'unit test', 'integration test', 'e2e']),
+        ('refactor', ['refactor', 'cleanup', 'reorganize']),
+        ('documentation', ['document', 'readme', 'docs', 'comment']),
+    ]
+
+    for task_type, keywords in task_types:
+        if any(keyword in desc_lower for keyword in keywords):
+            return task_type
+
+    return 'general'
 
 
 @app.get("/api/projects/{project_id}/env")

@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 import logging
 import asyncio
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -435,9 +436,40 @@ class ModelSelector:
             complexity=complexity
         )
 
+    def _parse_metadata(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parse task metadata, handling both dict and JSON string formats.
+
+        Args:
+            task: Task dictionary
+
+        Returns:
+            Parsed metadata dict (empty if parsing fails)
+        """
+        metadata = task.get('metadata', {})
+
+        # Handle string metadata (JSON)
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, ValueError):
+                logger.debug(f"Task {task.get('id', 'unknown')}: Failed to parse metadata JSON")
+                return {}
+
+        # Ensure it's a dict
+        if not isinstance(metadata, dict):
+            return {}
+
+        return metadata
+
     def _check_config_overrides(self, task: Dict[str, Any]) -> Optional[ModelTier]:
         """
         Check for configuration overrides (task type, epic priority, task metadata).
+
+        Override priority order:
+        1. Task metadata (highest priority)
+        2. Epic priority overrides
+        3. Task type overrides (lowest priority)
 
         Args:
             task: Task dictionary
@@ -445,22 +477,33 @@ class ModelSelector:
         Returns:
             ModelTier if override found, None otherwise
         """
-        # Check task metadata for explicit model override
-        if 'metadata' in task and task['metadata'].get('force_model'):
-            model_str = task['metadata']['force_model'].lower()
-            if model_str in ['haiku', 'sonnet', 'opus']:
-                return ModelTier[model_str.upper()]
+        # Priority 1: Check task metadata for explicit model override
+        metadata = self._parse_metadata(task)
+        if metadata:
+            force_model = metadata.get('force_model')
+            if force_model:
+                model_str = force_model.lower()
+                if model_str in ['haiku', 'sonnet', 'opus']:
+                    logger.info(
+                        f"Task {task.get('id', 'unknown')}: Model override from task metadata "
+                        f"(force_model={model_str.upper()})"
+                    )
+                    return ModelTier[model_str.upper()]
 
-        # Check config for priority-based overrides
+        # Priority 2: Check config for priority-based overrides (by epic priority)
         if hasattr(self.config, 'cost') and hasattr(self.config.cost, 'priority_overrides'):
             priority = task.get('priority', 5)
             priority_overrides = self.config.cost.priority_overrides
             if priority in priority_overrides:
                 model_str = priority_overrides[priority].lower()
                 if model_str in ['haiku', 'sonnet', 'opus']:
+                    logger.info(
+                        f"Task {task.get('id', 'unknown')}: Model override from epic priority "
+                        f"(priority={priority}, model={model_str.upper()})"
+                    )
                     return ModelTier[model_str.upper()]
 
-        # Check config for task type overrides (based on keywords in description)
+        # Priority 3: Check config for task type overrides (based on keywords in description)
         if hasattr(self.config, 'cost') and hasattr(self.config.cost, 'model_overrides'):
             description = task.get('description', '').lower()
             model_overrides = self.config.cost.model_overrides
@@ -468,20 +511,78 @@ class ModelSelector:
             for task_type, model_str in model_overrides.items():
                 if task_type.lower() in description:
                     if model_str.lower() in ['haiku', 'sonnet', 'opus']:
+                        logger.info(
+                            f"Task {task.get('id', 'unknown')}: Model override from task type "
+                            f"(type='{task_type}', model={model_str.upper()})"
+                        )
                         return ModelTier[model_str.upper()]
 
         return None
 
+    def _apply_overrides(
+        self,
+        task: Dict[str, Any],
+        base_recommendation: ModelRecommendation
+    ) -> ModelRecommendation:
+        """
+        Apply configuration overrides to a base model recommendation.
+
+        This method checks for overrides in the following priority order:
+        1. Task metadata (force_model field)
+        2. Epic priority overrides
+        3. Task type overrides
+
+        Args:
+            task: Task dictionary
+            base_recommendation: Base model recommendation from complexity analysis
+
+        Returns:
+            ModelRecommendation with overrides applied (or original if no overrides)
+        """
+        # Check for any overrides
+        override_model = self._check_config_overrides(task)
+
+        # If no override found, return original recommendation
+        if override_model is None:
+            return base_recommendation
+
+        # Apply override
+        override_reason = self._get_override_reason(task)
+        logger.info(
+            f"Task {task.get('id', 'unknown')}: Override applied - "
+            f"{base_recommendation.model.value} -> {override_model.value} "
+            f"(reason: {override_reason})"
+        )
+
+        return ModelRecommendation(
+            model=override_model,
+            reasoning=f"Configuration override for {override_reason}",
+            estimated_cost=self._estimate_cost(override_model),
+            complexity=base_recommendation.complexity
+        )
+
     def _get_override_reason(self, task: Dict[str, Any]) -> str:
-        """Get human-readable reason for override."""
-        if 'metadata' in task and task['metadata'].get('force_model'):
+        """
+        Get human-readable reason for override.
+
+        Args:
+            task: Task dictionary
+
+        Returns:
+            Reason string describing the source of the override
+        """
+        # Check task metadata
+        metadata = self._parse_metadata(task)
+        if metadata and metadata.get('force_model'):
             return "task metadata"
 
+        # Check priority overrides
         if hasattr(self.config, 'cost'):
             priority = task.get('priority', 5)
             if hasattr(self.config.cost, 'priority_overrides') and priority in self.config.cost.priority_overrides:
                 return f"priority {priority}"
 
+            # Check task type overrides
             description = task.get('description', '').lower()
             if hasattr(self.config.cost, 'model_overrides'):
                 for task_type in self.config.cost.model_overrides.keys():
