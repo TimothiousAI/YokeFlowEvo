@@ -169,7 +169,13 @@ export interface WebSocketMessage {
     | 'all_epics_complete'  // All epics finished
     | 'project_complete'  // Project fully complete
     | 'prompt_improvement_complete'  // Prompt improvement analysis completed
-    | 'prompt_improvement_failed';  // Prompt improvement analysis failed
+    | 'prompt_improvement_failed'  // Prompt improvement analysis failed
+    | 'batch_start'  // Parallel batch started
+    | 'batch_complete'  // Parallel batch completed
+    | 'task_start'  // Parallel task started
+    | 'task_complete'  // Parallel task completed
+    | 'cost_update'  // Parallel cost update
+    | 'agent_status';  // Parallel agent status update
   progress?: Progress;
   session_id?: string;
   status?: SessionStatus;
@@ -200,6 +206,32 @@ export interface WebSocketMessage {
     is_error?: boolean;
   };
   project_id?: string;  // For all events
+  // Parallel execution event fields
+  batch_number?: number;  // For batch_start, batch_complete events
+  total_batches?: number;  // For batch_start, batch_complete events
+  task_count?: number;  // For batch_start event
+  task_ids?: number[];  // For batch_start event
+  success_count?: number;  // For batch_complete event
+  fail_count?: number;  // For batch_complete event
+  epic_id?: number;  // For task_start, task_complete events
+  task_description?: string;  // For task_start event
+  started_at?: string;  // For task_start event
+  success?: boolean;  // For task_complete event
+  duration?: number;  // For task_complete event
+  cost?: number;  // For task_complete, cost_update events
+  model?: string;  // For task_start, task_complete events
+  task_cost?: number;  // For cost_update event
+  cumulative_cost?: number;  // For cost_update event
+  total_cost?: number;  // For batch_complete event
+  running_agents?: Array<{
+    task_id: number;
+    epic_id: number;
+    duration: number;
+    started_at: number;
+  }>;  // For agent_status event
+  active_agent_count?: number;  // For agent_status event
+  current_batch?: number;  // For agent_status event
+  total_duration?: number;  // For agent_status event
 }
 
 export interface HealthResponse {

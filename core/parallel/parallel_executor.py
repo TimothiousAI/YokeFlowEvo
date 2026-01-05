@@ -126,6 +126,9 @@ class ParallelExecutor:
         self.execution_start_time: Optional[float] = None
         self.current_batch_number: int = 0
 
+        # Periodic status updates task
+        self.status_update_task: Optional[asyncio.Task] = None
+
         logger.info(f"ParallelExecutor initialized (max_concurrency={max_concurrency})")
 
     async def execute(self) -> List[ExecutionResult]:
@@ -140,6 +143,11 @@ class ParallelExecutor:
 
         # Track execution start time
         self.execution_start_time = time.time()
+
+        # Start periodic agent status updates
+        if self.progress_callback:
+            self.status_update_task = asyncio.create_task(self._emit_agent_status_periodically())
+            logger.info("Started periodic agent status updates")
 
         try:
             # Load incomplete tasks from database
@@ -192,6 +200,16 @@ class ParallelExecutor:
 
                 logger.info(f"Processing batch {batch_number}/{len(dependency_graph.batches)}")
 
+                # Emit batch_start event
+                if self.progress_callback:
+                    await self.progress_callback({
+                        "type": "batch_start",
+                        "batch_number": batch_number,
+                        "total_batches": len(dependency_graph.batches),
+                        "task_count": len(task_ids),
+                        "task_ids": task_ids
+                    })
+
                 # Log current status
                 status = self.get_status()
                 logger.info(
@@ -207,9 +225,21 @@ class ParallelExecutor:
                 # Merge successful worktrees after each batch
                 # This will be implemented when we have worktree merge logic
                 successful = sum(1 for r in batch_results if r.success)
+                failed = len(batch_results) - successful
                 logger.info(
                     f"Batch {batch_number} complete: {successful}/{len(batch_results)} tasks successful"
                 )
+
+                # Emit batch_complete event
+                if self.progress_callback:
+                    await self.progress_callback({
+                        "type": "batch_complete",
+                        "batch_number": batch_number,
+                        "total_batches": len(dependency_graph.batches),
+                        "success_count": successful,
+                        "fail_count": failed,
+                        "total_cost": sum(r.cost for r in all_results)
+                    })
 
             logger.info(f"Parallel execution complete: {len(all_results)} tasks processed")
             return all_results
@@ -217,6 +247,16 @@ class ParallelExecutor:
         except Exception as e:
             logger.error(f"Parallel execution failed: {e}", exc_info=True)
             return all_results
+
+        finally:
+            # Stop periodic agent status updates
+            if self.status_update_task:
+                self.status_update_task.cancel()
+                try:
+                    await self.status_update_task
+                except asyncio.CancelledError:
+                    pass
+                logger.info("Stopped periodic agent status updates")
 
     async def execute_batch(self, batch_number: int, task_ids: List[int]) -> List[ExecutionResult]:
         """
@@ -356,9 +396,20 @@ class ParallelExecutor:
             ExecutionResult
         """
         task_id = task.get('id', 0)
+        epic_id = task.get('epic_id', 0)
         start_time = time.time()
 
         logger.info(f"Starting agent for task {task_id}")
+
+        # Emit task_start event
+        if self.progress_callback:
+            await self.progress_callback({
+                "type": "task_start",
+                "task_id": task_id,
+                "epic_id": epic_id,
+                "task_description": task.get('description', ''),
+                "started_at": datetime.now().isoformat()
+            })
 
         try:
             # Load relevant expertise for task domain
@@ -467,6 +518,34 @@ class ParallelExecutor:
                     task=task,
                     logs=logs
                 )
+
+            # Emit task_complete event
+            duration = time.time() - start_time
+            if self.progress_callback:
+                await self.progress_callback({
+                    "type": "task_complete",
+                    "task_id": task_id,
+                    "epic_id": epic_id,
+                    "success": execution_result.success,
+                    "duration": duration,
+                    "cost": execution_result.cost,
+                    "model": model if 'model' in locals() else 'unknown'
+                })
+
+            # Emit cost_update event with cumulative cost
+            if self.progress_callback:
+                # Get current total cost (sum of all completed tasks)
+                total_cost = execution_result.cost
+                if self.db:
+                    # Could query database for total costs, but for now use simple accumulation
+                    pass
+
+                await self.progress_callback({
+                    "type": "cost_update",
+                    "task_id": task_id,
+                    "task_cost": execution_result.cost,
+                    "cumulative_cost": total_cost  # Will be properly calculated when integrated
+                })
 
             return execution_result
 
@@ -822,6 +901,35 @@ Focus on quality over speed. Take time to test thoroughly and write clean, maint
         # Note: We don't forcefully kill processes here. The cancel_event will be
         # checked by the execute() loop and by run_agent_session() via session_manager.
         # This allows agents to clean up gracefully (save logs, finalize sessions, etc.)
+
+    async def _emit_agent_status_periodically(self):
+        """
+        Periodically emit agent_status events with running agent information.
+        Runs every 5 seconds until execution completes.
+        """
+        try:
+            while not self.cancel_event.is_set():
+                # Get current status
+                status = self.get_status()
+
+                # Emit agent_status event
+                if self.progress_callback:
+                    await self.progress_callback({
+                        "type": "agent_status",
+                        "running_agents": status['running_agents'],
+                        "active_agent_count": status['active_agent_count'],
+                        "current_batch": status['current_batch'],
+                        "total_duration": status['total_duration']
+                    })
+
+                # Wait 5 seconds before next update
+                await asyncio.sleep(5)
+
+        except asyncio.CancelledError:
+            # Task was cancelled, exit gracefully
+            logger.debug("Agent status update task cancelled")
+        except Exception as e:
+            logger.error(f"Error in agent status update task: {e}", exc_info=True)
 
     def get_status(self) -> dict:
         """
