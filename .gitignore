@@ -50,6 +50,11 @@ postgres_data/
 Thumbs.db
 *.bak
 *.tmp
+nul
+
+# Project-specific (user-created)
+app_spec.txt
+claude-progress.md
 
 # Coverage and testing
 .coverage
