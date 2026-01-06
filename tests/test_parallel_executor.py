@@ -11,6 +11,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch, MagicMock
 from datetime import datetime
 
+import pytest
+
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -41,6 +43,7 @@ def create_mock_db(tasks):
 class TestSingleBatchExecution:
     """Test execution of a single batch of tasks."""
 
+    @pytest.mark.asyncio
     async def test_single_batch_success(self):
         """Test successful execution of single batch."""
         print("\n=== Test: Single Batch Execution Success ===")
@@ -114,6 +117,7 @@ class TestSingleBatchExecution:
 class TestMultiBatchExecution:
     """Test sequential execution of multiple batches."""
 
+    @pytest.mark.asyncio
     async def test_multi_batch_sequential(self):
         """Test that batches execute sequentially."""
         print("\n=== Test: Multi-Batch Sequential Execution ===")
@@ -182,6 +186,7 @@ class TestMultiBatchExecution:
 class TestConcurrencyLimit:
     """Test concurrency limit enforcement."""
 
+    @pytest.mark.asyncio
     async def test_concurrency_limit_enforced(self):
         """Test that max concurrent agents is respected."""
         print("\n=== Test: Concurrency Limit Enforcement ===")
@@ -250,6 +255,7 @@ class TestConcurrencyLimit:
 class TestFailureHandling:
     """Test handling of task failures."""
 
+    @pytest.mark.asyncio
     async def test_partial_batch_failure(self):
         """Test that batch continues even with partial failures."""
         print("\n=== Test: Partial Batch Failure Handling ===")
@@ -328,6 +334,7 @@ class TestFailureHandling:
 class TestCancellation:
     """Test execution cancellation."""
 
+    @pytest.mark.asyncio
     async def test_cancellation_mid_execution(self):
         """Test that execution can be cancelled mid-batch."""
         print("\n=== Test: Cancellation Mid-Execution ===")
@@ -415,6 +422,7 @@ class TestCancellation:
 class TestProgressCallback:
     """Test progress callback invocation."""
 
+    @pytest.mark.asyncio
     async def test_progress_callback_called(self):
         """Test that progress callback is invoked during execution."""
         print("\n=== Test: Progress Callback Invocation ===")
@@ -488,6 +496,7 @@ class TestProgressCallback:
 class TestWorktreeAssignment:
     """Test worktree assignment by epic."""
 
+    @pytest.mark.asyncio
     async def test_worktree_per_epic(self):
         """Test that tasks from same epic use same worktree."""
         print("\n=== Test: Worktree Assignment by Epic ===")
