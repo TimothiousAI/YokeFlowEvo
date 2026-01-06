@@ -188,12 +188,12 @@ async def cleanup_containers(stopped_only: bool = False, force: bool = False, al
             print(f"[OK] Removed: {name}")
             removed += 1
         else:
-            print(f"✗ Failed: {name}")
+            print(f"[FAIL] Failed: {name}")
             failed += 1
 
     print(f"\n[OK] Removed {removed} container(s)")
     if failed > 0:
-        print(f"✗ Failed to remove {failed} container(s)")
+        print(f"[FAIL] Failed to remove {failed} container(s)")
 
     print()
     return removed

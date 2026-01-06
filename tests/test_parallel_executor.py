@@ -101,8 +101,8 @@ class TestSingleBatchExecution:
                                 assert all(r.success for r in results)
                                 assert mock_create.call_count >= 1
 
-                                print(f"✓ Executed {len(results)} tasks successfully")
-                                print(f"✓ Created worktrees")
+                                print(f"[PASS] Executed {len(results)} tasks successfully")
+                                print(f"[PASS] Created worktrees")
 
         finally:
             import shutil
@@ -148,22 +148,29 @@ class TestMultiBatchExecution:
                         missing_deps=[]
                     )
 
-                    executor.db = Mock()
-                    executor.db.get_tasks_with_dependencies = AsyncMock(return_value=[
-                        {'id': i, 'epic_id': 1, 'description': f'Task {i}', 'action': f'Do task {i}'}
+                    tasks = [
+                        {'id': i, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': f'Task {i}', 'action': f'Do task {i}'}
                         for i in range(1, 6)
-                    ])
+                    ]
+                    executor.db = Mock()
+                    executor.db.get_tasks_with_dependencies = AsyncMock(return_value=tasks)
                     executor.db.create_parallel_batch = AsyncMock(return_value={'id': 1})
                     executor.db.update_batch_status = AsyncMock()
+                    executor.db.list_parallel_batches = AsyncMock(return_value=[
+                        {'id': 1, 'batch_number': 1, 'status': 'pending'}
+                    ])
+                    executor.db.get_task_with_tests = AsyncMock(side_effect=lambda task_id, project_id: next(
+                        (t for t in tasks if t['id'] == task_id), None
+                    ))
 
                     # Execute
                     results = await executor.execute()
 
-                    # Verify batches executed in order
-                    assert batch_execution_order == [0, 1, 2]
+                    # Verify batches executed in order (1-indexed in actual code)
+                    assert batch_execution_order == [1, 2, 3]
                     assert len(results) == 5
-                    print(f"✓ Executed {len(results)} tasks across 3 batches")
-                    print(f"✓ Batch execution order: {batch_execution_order}")
+                    print(f"[PASS] Executed {len(results)} tasks across 3 batches")
+                    print(f"[PASS] Batch execution order: {batch_execution_order}")
 
         finally:
             import shutil
@@ -231,7 +238,7 @@ class TestConcurrencyLimit:
 
                             # Max concurrent should not exceed limit
                             assert max_concurrent <= 2, f"Max concurrent was {max_concurrent}, limit is 2"
-                            print(f"✓ Max concurrent agents: {max_concurrent} (limit: 2)")
+                            print(f"[PASS] Max concurrent agents: {max_concurrent} (limit: 2)")
 
         finally:
             import shutil
@@ -285,14 +292,21 @@ class TestFailureHandling:
                                 missing_deps=[]
                             )
 
+                            tasks = [
+                                {'id': 1, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': 'Task 1', 'action': 'Do 1'},
+                                {'id': 2, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': 'Task 2', 'action': 'Do 2'},
+                                {'id': 3, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': 'Task 3', 'action': 'Do 3'},
+                            ]
                             executor.db = Mock()
-                            executor.db.get_tasks_with_dependencies = AsyncMock(return_value=[
-                                {'id': 1, 'epic_id': 1, 'description': 'Task 1', 'action': 'Do 1'},
-                                {'id': 2, 'epic_id': 1, 'description': 'Task 2', 'action': 'Do 2'},
-                                {'id': 3, 'epic_id': 1, 'description': 'Task 3', 'action': 'Do 3'},
-                            ])
+                            executor.db.get_tasks_with_dependencies = AsyncMock(return_value=tasks)
                             executor.db.create_parallel_batch = AsyncMock(return_value={'id': 1})
                             executor.db.update_batch_status = AsyncMock()
+                            executor.db.list_parallel_batches = AsyncMock(return_value=[
+                                {'id': 1, 'batch_number': 1, 'status': 'pending'}
+                            ])
+                            executor.db.get_task_with_tests = AsyncMock(side_effect=lambda task_id, project_id: next(
+                                (t for t in tasks if t['id'] == task_id), None
+                            ))
 
                             results = await executor.execute()
 
@@ -302,7 +316,7 @@ class TestFailureHandling:
 
                             assert success_count == 2
                             assert failure_count == 1
-                            print(f"✓ Batch completed: {success_count} succeeded, {failure_count} failed")
+                            print(f"[PASS] Batch completed: {success_count} succeeded, {failure_count} failed")
 
         finally:
             import shutil
@@ -356,13 +370,20 @@ class TestCancellation:
                             missing_deps=[]
                         )
 
-                        executor.db = Mock()
-                        executor.db.get_tasks_with_dependencies = AsyncMock(return_value=[
-                            {'id': i, 'epic_id': 1, 'description': f'Task {i}', 'action': f'Do {i}'}
+                        tasks = [
+                            {'id': i, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': f'Task {i}', 'action': f'Do {i}'}
                             for i in range(1, 5)
-                        ])
+                        ]
+                        executor.db = Mock()
+                        executor.db.get_tasks_with_dependencies = AsyncMock(return_value=tasks)
                         executor.db.create_parallel_batch = AsyncMock(return_value={'id': 1})
                         executor.db.update_batch_status = AsyncMock()
+                        executor.db.list_parallel_batches = AsyncMock(return_value=[
+                            {'id': 1, 'batch_number': 1, 'status': 'pending'}
+                        ])
+                        executor.db.get_task_with_tests = AsyncMock(side_effect=lambda task_id, project_id: next(
+                            (t for t in tasks if t['id'] == task_id), None
+                        ))
 
                         # Start execution in background
                         exec_task = asyncio.create_task(executor.execute())
@@ -380,9 +401,9 @@ class TestCancellation:
                             pass
 
                         # Verify cancellation occurred
-                        assert executor._cancel_event.is_set()
-                        print(f"✓ Execution cancelled")
-                        print(f"✓ Tasks started before cancel: {len(tasks_started)}")
+                        assert executor.cancel_event.is_set()
+                        print(f"[PASS] Execution cancelled")
+                        print(f"[PASS] Tasks started before cancel: {len(tasks_started)}")
 
         finally:
             import shutil
@@ -404,8 +425,9 @@ class TestProgressCallback:
 
             callback_invocations = []
 
-            def progress_callback(event_type, data):
-                callback_invocations.append((event_type, data))
+            async def progress_callback(data):
+                """Async callback matching executor's expected signature."""
+                callback_invocations.append(data)
 
             executor = ParallelExecutor(
                 project_path=temp_dir,
@@ -432,22 +454,29 @@ class TestProgressCallback:
                                 cost=0.01
                             )
 
+                            tasks = [
+                                {'id': 1, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': 'Task 1', 'action': 'Do 1'},
+                                {'id': 2, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': 'Task 2', 'action': 'Do 2'},
+                            ]
                             executor.db = Mock()
-                            executor.db.get_tasks_with_dependencies = AsyncMock(return_value=[
-                                {'id': 1, 'epic_id': 1, 'description': 'Task 1', 'action': 'Do 1'},
-                                {'id': 2, 'epic_id': 1, 'description': 'Task 2', 'action': 'Do 2'},
-                            ])
+                            executor.db.get_tasks_with_dependencies = AsyncMock(return_value=tasks)
                             executor.db.create_parallel_batch = AsyncMock(return_value={'id': 1})
                             executor.db.update_batch_status = AsyncMock()
+                            executor.db.list_parallel_batches = AsyncMock(return_value=[
+                                {'id': 1, 'batch_number': 1, 'status': 'pending'}
+                            ])
+                            executor.db.get_task_with_tests = AsyncMock(side_effect=lambda task_id, project_id: next(
+                                (t for t in tasks if t['id'] == task_id), None
+                            ))
 
                             await executor.execute()
 
                             # Verify callbacks were invoked
                             assert len(callback_invocations) > 0
-                            event_types = [inv[0] for inv in callback_invocations]
+                            event_types = [inv.get('type', 'unknown') for inv in callback_invocations]
 
-                            print(f"✓ Progress callback invoked {len(callback_invocations)} times")
-                            print(f"✓ Event types: {set(event_types)}")
+                            print(f"[PASS] Progress callback invoked {len(callback_invocations)} times")
+                            print(f"[PASS] Event types: {set(event_types)}")
 
         finally:
             import shutil
@@ -504,15 +533,22 @@ class TestWorktreeAssignment:
                                 cost=0.01
                             )
 
+                            tasks = [
+                                {'id': 1, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': 'Task 1', 'action': 'Do 1'},
+                                {'id': 2, 'epic_id': 1, 'epic_name': 'Epic 1', 'description': 'Task 2', 'action': 'Do 2'},
+                                {'id': 3, 'epic_id': 2, 'epic_name': 'Epic 2', 'description': 'Task 3', 'action': 'Do 3'},
+                                {'id': 4, 'epic_id': 2, 'epic_name': 'Epic 2', 'description': 'Task 4', 'action': 'Do 4'},
+                            ]
                             executor.db = Mock()
-                            executor.db.get_tasks_with_dependencies = AsyncMock(return_value=[
-                                {'id': 1, 'epic_id': 1, 'description': 'Task 1', 'action': 'Do 1'},
-                                {'id': 2, 'epic_id': 1, 'description': 'Task 2', 'action': 'Do 2'},
-                                {'id': 3, 'epic_id': 2, 'description': 'Task 3', 'action': 'Do 3'},
-                                {'id': 4, 'epic_id': 2, 'description': 'Task 4', 'action': 'Do 4'},
-                            ])
+                            executor.db.get_tasks_with_dependencies = AsyncMock(return_value=tasks)
                             executor.db.create_parallel_batch = AsyncMock(return_value={'id': 1})
                             executor.db.update_batch_status = AsyncMock()
+                            executor.db.list_parallel_batches = AsyncMock(return_value=[
+                                {'id': 1, 'batch_number': 1, 'status': 'pending'}
+                            ])
+                            executor.db.get_task_with_tests = AsyncMock(side_effect=lambda task_id, project_id: next(
+                                (t for t in tasks if t['id'] == task_id), None
+                            ))
 
                             await executor.execute()
 
@@ -520,7 +556,7 @@ class TestWorktreeAssignment:
                             assert len(worktree_assignments) == 2
                             assert 1 in worktree_assignments
                             assert 2 in worktree_assignments
-                            print(f"✓ Created {len(worktree_assignments)} worktrees for {len(worktree_assignments)} epics")
+                            print(f"[PASS] Created {len(worktree_assignments)} worktrees for {len(worktree_assignments)} epics")
 
         finally:
             import shutil
@@ -568,13 +604,13 @@ async def run_all_tests():
         print("[SUCCESS] ALL TESTS PASSED (7/7)")
         print("="*60)
         print("\nTest Coverage:")
-        print("  ✓ Single batch execution")
-        print("  ✓ Multi-batch sequential execution")
-        print("  ✓ Concurrency limit enforcement")
-        print("  ✓ Failure handling (partial batch failure)")
-        print("  ✓ Cancellation mid-execution")
-        print("  ✓ Progress callback invocation")
-        print("  ✓ Worktree assignment by epic")
+        print("  [PASS] Single batch execution")
+        print("  [PASS] Multi-batch sequential execution")
+        print("  [PASS] Concurrency limit enforcement")
+        print("  [PASS] Failure handling (partial batch failure)")
+        print("  [PASS] Cancellation mid-execution")
+        print("  [PASS] Progress callback invocation")
+        print("  [PASS] Worktree assignment by epic")
 
         return True
 

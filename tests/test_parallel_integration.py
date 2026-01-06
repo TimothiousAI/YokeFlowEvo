@@ -185,7 +185,7 @@ def test_end_to_end_parallel_execution_setup(temp_project_dir, mock_db):
     assert executor.max_concurrency == 2, "Max concurrency should match"
     assert executor.db == mock_db, "DB connection should match"
 
-    print("✓ Parallel executor setup test passed")
+    print("[PASS] Parallel executor setup test passed")
 
 
 @pytest.mark.asyncio
@@ -207,7 +207,7 @@ async def test_worktree_initialization(temp_project_dir, mock_db):
     assert worktree_dir.exists(), "Worktree directory should be created"
     assert worktree_dir.is_dir(), "Worktree path should be a directory"
 
-    print("✓ Worktree initialization test passed")
+    print("[PASS] Worktree initialization test passed")
 
 
 def test_dependency_resolution():
@@ -237,7 +237,7 @@ def test_dependency_resolution():
     # Verify no circular dependencies
     assert graph.circular_deps == [], "Should have no circular dependencies"
 
-    print("✓ Dependency resolution test passed")
+    print("[PASS] Dependency resolution test passed")
 
 
 @pytest.mark.asyncio
@@ -279,7 +279,7 @@ async def test_expertise_accumulation(mock_db):
     pattern_names = [p['name'] for p in patterns]
     assert any('Read-Edit' in name for name in pattern_names), "Should find Read-Edit pattern"
 
-    print(f"✓ Expertise accumulation test passed: {len(patterns)} patterns extracted")
+    print(f"[PASS] Expertise accumulation test passed: {len(patterns)} patterns extracted")
 
 
 @pytest.mark.asyncio
@@ -320,7 +320,7 @@ async def test_cost_tracking_accuracy(mock_db):
     assert abs(haiku_cost - 0.001) < 0.0001, "HAIKU cost should be accurate"
     assert abs(sonnet_cost - 0.006) < 0.0001, "SONNET cost should be accurate"
 
-    print(f"✓ Cost tracking test passed: ${total_cost:.4f} total (HAIKU: ${haiku_cost:.4f}, SONNET: ${sonnet_cost:.4f})")
+    print(f"[PASS] Cost tracking test passed: ${total_cost:.4f} total (HAIKU: ${haiku_cost:.4f}, SONNET: ${sonnet_cost:.4f})")
 
 
 def test_execution_result_creation():
@@ -352,7 +352,7 @@ def test_execution_result_creation():
     assert failure_result.success is False, "Should be failed"
     assert failure_result.error == 'Test error message', "Error should match"
 
-    print("✓ ExecutionResult creation test passed")
+    print("[PASS] ExecutionResult creation test passed")
 
 
 # Run tests

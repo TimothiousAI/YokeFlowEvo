@@ -362,7 +362,7 @@ class ModelSelector:
         # Clamp to [0.0, 1.0]
         return max(0.0, min(1.0, score))
 
-    def recommend_model(self, task: Dict[str, Any]) -> ModelRecommendation:
+    async def recommend_model(self, task: Dict[str, Any]) -> ModelRecommendation:
         """
         Recommend optimal model for a task.
 
@@ -402,7 +402,7 @@ class ModelSelector:
             complexity_reason = f"High complexity score ({complexity.overall_score:.2f})"
 
         # Step 4: Consider historical performance for similar tasks
-        historical_adjustment = self._get_historical_performance_adjustment(task, base_model)
+        historical_adjustment = await self._get_historical_performance_adjustment_async(task, base_model)
         recommended_model = base_model
         historical_reason = ""
 
@@ -412,7 +412,7 @@ class ModelSelector:
             logger.info(f"Task {task_id}: Historical performance adjusted {base_model.value} -> {recommended_model.value}")
 
         # Step 5: Check budget constraints and downgrade if necessary
-        within_budget, remaining = self.check_budget()
+        within_budget, remaining = await self.check_budget_async()
         recommended_model, budget_reason = self._downgrade_for_budget(
             recommended_model, remaining, within_budget
         )
@@ -801,6 +801,77 @@ class ModelSelector:
 
         return None
 
+    async def _get_historical_performance_adjustment_async(
+        self,
+        task: Dict[str, Any],
+        base_model: ModelTier
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Async version: Check historical performance for similar tasks and adjust recommendation.
+
+        Args:
+            task: Task dictionary
+            base_model: Model selected by complexity analysis
+
+        Returns:
+            Dict with 'model' and 'reason' if adjustment needed, None otherwise
+        """
+        # Extract task type
+        description = task.get('description', '')
+        task_type = self._extract_task_type(description)
+
+        # Get stats for the base model
+        base_stats = await self._get_historical_performance(task_type, base_model.value)
+
+        # If insufficient data, no adjustment
+        if not base_stats or base_stats['count'] < PERFORMANCE_MIN_SAMPLES:
+            return None
+
+        # Check if base model has low success rate
+        if base_stats['success_rate'] < PERFORMANCE_SUCCESS_THRESHOLD:
+            # Try to upgrade to next tier
+            if base_model == ModelTier.HAIKU:
+                # Upgrade HAIKU -> SONNET if HAIKU has poor success rate
+                sonnet_stats = await self._get_historical_performance(task_type, ModelTier.SONNET.value)
+                if sonnet_stats and sonnet_stats['success_rate'] > base_stats['success_rate']:
+                    return {
+                        'model': ModelTier.SONNET,
+                        'reason': f"historical data: {base_model.value} has {base_stats['success_rate']:.1%} success rate on {task_type} tasks"
+                    }
+            elif base_model == ModelTier.SONNET:
+                # Upgrade SONNET -> OPUS if SONNET has poor success rate
+                opus_stats = await self._get_historical_performance(task_type, ModelTier.OPUS.value)
+                if opus_stats and opus_stats['success_rate'] > base_stats['success_rate']:
+                    return {
+                        'model': ModelTier.OPUS,
+                        'reason': f"historical data: {base_model.value} has {base_stats['success_rate']:.1%} success rate on {task_type} tasks"
+                    }
+
+        # Check if we can safely downgrade (base model is SONNET or OPUS with good success)
+        if base_stats['success_rate'] >= 0.9:  # 90%+ success rate
+            if base_model == ModelTier.OPUS:
+                # Check if SONNET also has good success rate -> downgrade to save cost
+                sonnet_stats = await self._get_historical_performance(task_type, ModelTier.SONNET.value)
+                if (sonnet_stats and
+                    sonnet_stats['count'] >= PERFORMANCE_MIN_SAMPLES and
+                    sonnet_stats['success_rate'] >= 0.85):  # Allow 5% success rate drop for cost savings
+                    return {
+                        'model': ModelTier.SONNET,
+                        'reason': f"historical data: {ModelTier.SONNET.value} has {sonnet_stats['success_rate']:.1%} success rate on {task_type} tasks (cost optimization)"
+                    }
+            elif base_model == ModelTier.SONNET:
+                # Check if HAIKU also has good success rate -> downgrade to save cost
+                haiku_stats = await self._get_historical_performance(task_type, ModelTier.HAIKU.value)
+                if (haiku_stats and
+                    haiku_stats['count'] >= PERFORMANCE_MIN_SAMPLES and
+                    haiku_stats['success_rate'] >= 0.85):
+                    return {
+                        'model': ModelTier.HAIKU,
+                        'reason': f"historical data: {ModelTier.HAIKU.value} has {haiku_stats['success_rate']:.1%} success rate on {task_type} tasks (cost optimization)"
+                    }
+
+        return None
+
     def _estimate_cost(self, model: ModelTier) -> float:
         """
         Estimate cost for a task using the given model.
@@ -863,6 +934,44 @@ class ModelSelector:
 
         # Query total spent
         total_spent = loop.run_until_complete(self._get_total_spent())
+
+        # Calculate remaining budget
+        remaining = budget_limit - total_spent
+
+        # Within budget if remaining is positive
+        within_budget = remaining > 0
+
+        logger.debug(f"Budget check: spent=${total_spent:.2f}, limit=${budget_limit:.2f}, remaining=${remaining:.2f}")
+
+        # Log warnings at 80% and 95% usage
+        usage_pct = (total_spent / budget_limit) * 100 if budget_limit > 0 else 0
+        if usage_pct >= 95:
+            logger.warning(f"BUDGET CRITICAL: {usage_pct:.1f}% used (${total_spent:.2f} / ${budget_limit:.2f})")
+        elif usage_pct >= 80:
+            logger.warning(f"BUDGET WARNING: {usage_pct:.1f}% used (${total_spent:.2f} / ${budget_limit:.2f})")
+
+        return (within_budget, remaining)
+
+    async def check_budget_async(self) -> tuple[bool, float]:
+        """
+        Async version: Check if within budget limit.
+
+        Queries agent_costs table to calculate total spent and compares
+        against config.cost.budget_limit_usd.
+
+        Returns:
+            Tuple of (within_budget, remaining_usd)
+            - within_budget: True if under budget or no budget set
+            - remaining_usd: Remaining budget (or 999999.0 if unlimited)
+        """
+        # If no budget limit configured, return unlimited
+        if not hasattr(self.config, 'cost') or self.config.cost.budget_limit_usd is None:
+            return (True, 999999.0)
+
+        budget_limit = self.config.cost.budget_limit_usd
+
+        # Query total spent asynchronously
+        total_spent = await self._get_total_spent()
 
         # Calculate remaining budget
         remaining = budget_limit - total_spent

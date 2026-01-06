@@ -2261,6 +2261,65 @@ class TaskDatabase:
             logger.error(f"Failed to mark worktree {worktree_id} as merged: {e}")
             raise
 
+    async def update_worktree(
+        self,
+        worktree_id: int,
+        status: Optional[str] = None,
+        merge_commit: Optional[str] = None
+    ) -> bool:
+        """
+        Update worktree record by epic_id.
+
+        Note: worktree_id parameter actually accepts epic_id for compatibility
+        with worktree_manager.py which uses epic_id as the identifier.
+        The lookup is done by epic_id via the UNIQUE(project_id, epic_id) constraint.
+
+        Args:
+            worktree_id: Epic ID (not worktree table ID)
+            status: New status (active, merged, conflict, abandoned, cleanup)
+            merge_commit: Merge commit SHA (optional)
+
+        Returns:
+            True if updated successfully
+        """
+        try:
+            async with self.acquire() as conn:
+                # Build dynamic update
+                updates = []
+                params = []
+                param_idx = 1
+
+                if status is not None:
+                    updates.append(f"status = ${param_idx}")
+                    params.append(status)
+                    param_idx += 1
+
+                if merge_commit is not None:
+                    updates.append(f"merge_commit = ${param_idx}")
+                    params.append(merge_commit)
+                    param_idx += 1
+                    updates.append(f"merged_at = NOW()")
+
+                if not updates:
+                    return False
+
+                # Update by epic_id (the worktree_id parameter is actually epic_id)
+                params.append(worktree_id)
+                query = f"""
+                    UPDATE worktrees
+                    SET {', '.join(updates)}
+                    WHERE epic_id = ${param_idx}
+                """
+
+                result = await conn.execute(query, *params)
+                updated = result.split()[-1] != '0'
+                if updated:
+                    logger.info(f"Updated worktree for epic {worktree_id}: status={status}")
+                return updated
+        except Exception as e:
+            logger.error(f"Failed to update worktree for epic {worktree_id}: {e}")
+            raise
+
     async def delete_worktree(self, worktree_id: int) -> bool:
         """
         Delete a worktree record.

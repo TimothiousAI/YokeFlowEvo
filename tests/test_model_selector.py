@@ -6,6 +6,7 @@ Tests the model recommendation logic with various complexity levels.
 """
 
 import sys
+import pytest
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -25,7 +26,8 @@ class MockDB:
 sys.path.insert(0, '.')
 from core.learning.model_selector import ModelSelector, ModelTier
 
-def test_low_complexity():
+@pytest.mark.asyncio
+async def test_low_complexity():
     """Test that low complexity tasks recommend HAIKU."""
     config = MockConfig()
     db = MockDB()
@@ -41,7 +43,7 @@ def test_low_complexity():
         'priority': 5
     }
 
-    recommendation = selector.recommend_model(task)
+    recommendation = await selector.recommend_model(task)
 
     print(f"\n=== LOW COMPLEXITY TEST ===")
     print(f"Task: {task['description']}")
@@ -54,7 +56,8 @@ def test_low_complexity():
     assert recommendation.complexity.overall_score < 0.3, f"Expected score < 0.3, got {recommendation.complexity.overall_score}"
     print("[PASS] Low complexity test passed")
 
-def test_medium_complexity():
+@pytest.mark.asyncio
+async def test_medium_complexity():
     """Test that medium complexity tasks recommend SONNET."""
     config = MockConfig()
     db = MockDB()
@@ -70,7 +73,7 @@ def test_medium_complexity():
         'priority': 2
     }
 
-    recommendation = selector.recommend_model(task)
+    recommendation = await selector.recommend_model(task)
 
     print(f"\n=== MEDIUM COMPLEXITY TEST ===")
     print(f"Task: {task['description']}")
@@ -84,7 +87,8 @@ def test_medium_complexity():
     assert recommendation.complexity.overall_score >= 0.3, f"Expected score >= 0.3, got {recommendation.complexity.overall_score}"
     print("[PASS] Medium complexity test passed")
 
-def test_high_complexity():
+@pytest.mark.asyncio
+async def test_high_complexity():
     """Test that high complexity tasks recommend SONNET or OPUS."""
     config = MockConfig()
     db = MockDB()
@@ -100,7 +104,7 @@ def test_high_complexity():
         'priority': 1
     }
 
-    recommendation = selector.recommend_model(task)
+    recommendation = await selector.recommend_model(task)
 
     print(f"\n=== HIGH COMPLEXITY TEST ===")
     print(f"Task: {task['description']}")
@@ -146,7 +150,8 @@ def test_complexity_analysis():
     assert complexity.reasoning_depth > 0.1, "Should have some reasoning depth"
     print("[PASS] Complexity analysis test passed")
 
-def test_budget_enforcement():
+@pytest.mark.asyncio
+async def test_budget_enforcement():
     """Test that budget constraints are considered in model selection."""
     # Create config with strict budget
     @dataclass
@@ -167,7 +172,7 @@ def test_budget_enforcement():
         'priority': 1
     }
 
-    recommendation = selector.recommend_model(task)
+    recommendation = await selector.recommend_model(task)
 
     print(f"\n=== BUDGET ENFORCEMENT TEST ===")
     print(f"Task: {task['description']}")
@@ -184,7 +189,8 @@ def test_budget_enforcement():
     assert hasattr(config, 'max_cost_per_session'), "Config should have budget attribute"
     print("[PASS] Budget enforcement test passed")
 
-def test_no_budget_set():
+@pytest.mark.asyncio
+async def test_no_budget_set():
     """Test model selection when no budget is configured."""
     config = MockConfig()  # No max_cost_per_session attribute
     db = MockDB()
@@ -200,7 +206,7 @@ def test_no_budget_set():
         'priority': 1
     }
 
-    recommendation = selector.recommend_model(task)
+    recommendation = await selector.recommend_model(task)
 
     print(f"\n=== NO BUDGET TEST ===")
     print(f"Task: {task['description']}")
@@ -212,7 +218,8 @@ def test_no_budget_set():
         f"Expected SONNET/OPUS without budget, got {recommendation.model.value}"
     print("[PASS] No budget test passed")
 
-def test_empty_history():
+@pytest.mark.asyncio
+async def test_empty_history():
     """Test model selection with no historical performance data."""
     from datetime import datetime, timedelta
 
@@ -234,7 +241,7 @@ def test_empty_history():
         'priority': 3
     }
 
-    recommendation = selector.recommend_model(task)
+    recommendation = await selector.recommend_model(task)
 
     print(f"\n=== EMPTY HISTORY TEST ===")
     print(f"Task: {task['description']}")
@@ -248,7 +255,8 @@ def test_empty_history():
     assert len(recommendation.reasoning) > 0, "Should have reasoning even without history"
     print("[PASS] Empty history test passed")
 
-def test_edge_case_empty_task():
+@pytest.mark.asyncio
+async def test_edge_case_empty_task():
     """Test handling of task with minimal information."""
     config = MockConfig()
     db = MockDB()
@@ -264,7 +272,7 @@ def test_edge_case_empty_task():
         'priority': 5
     }
 
-    recommendation = selector.recommend_model(task)
+    recommendation = await selector.recommend_model(task)
 
     print(f"\n=== EMPTY TASK TEST ===")
     print(f"Task has empty description and action")
@@ -276,7 +284,8 @@ def test_edge_case_empty_task():
         f"Expected HAIKU for minimal task, got {recommendation.model.value}"
     print("[PASS] Empty task test passed")
 
-def test_edge_case_very_long_description():
+@pytest.mark.asyncio
+async def test_edge_case_very_long_description():
     """Test handling of task with very long description."""
     config = MockConfig()
     db = MockDB()
@@ -293,7 +302,7 @@ def test_edge_case_very_long_description():
         'priority': 5
     }
 
-    recommendation = selector.recommend_model(task)
+    recommendation = await selector.recommend_model(task)
 
     print(f"\n=== VERY LONG DESCRIPTION TEST ===")
     print(f"Task description length: {len(task['description'])} chars")
@@ -305,19 +314,24 @@ def test_edge_case_very_long_description():
     print("[PASS] Very long description test passed")
 
 if __name__ == '__main__':
+    import asyncio
+
+    async def run_all_tests():
+        await test_low_complexity()
+        await test_medium_complexity()
+        await test_high_complexity()
+        test_complexity_analysis()  # This one is sync
+        await test_budget_enforcement()
+        await test_no_budget_set()
+        await test_empty_history()
+        await test_edge_case_empty_task()
+        await test_edge_case_very_long_description()
+
     print("Testing ModelSelector.recommend_model() implementation")
     print("=" * 60)
 
     try:
-        test_low_complexity()
-        test_medium_complexity()
-        test_high_complexity()
-        test_complexity_analysis()
-        test_budget_enforcement()
-        test_no_budget_set()
-        test_empty_history()
-        test_edge_case_empty_task()
-        test_edge_case_very_long_description()
+        asyncio.run(run_all_tests())
 
         print("\n" + "=" * 60)
         print("[SUCCESS] ALL TESTS PASSED")

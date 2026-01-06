@@ -54,8 +54,8 @@ class TestWorktreeCreation:
                         # Path should contain epic ID
                         assert "epic-1" in worktree.path or "epic_1" in worktree.path
 
-                        print(f"✓ Created worktree: {worktree.branch}")
-                        print(f"✓ Path: {worktree.path}")
+                        print(f"[PASS] Created worktree: {worktree.branch}")
+                        print(f"[PASS] Path: {worktree.path}")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -87,7 +87,7 @@ class TestWorktreeCreation:
                         assert worktree1.path == worktree2.path
                         assert worktree1.branch == worktree2.branch
 
-                        print(f"✓ Reused existing worktree for epic 1")
+                        print(f"[PASS] Reused existing worktree for epic 1")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -135,8 +135,8 @@ class TestWorktreeMerge:
                             assert commit_hash == "abc123def"
                             assert manager._worktrees[1].status == "merged"
 
-                            print(f"✓ Merged worktree successfully")
-                            print(f"✓ Commit hash: {commit_hash}")
+                            print(f"[PASS] Merged worktree successfully")
+                            print(f"[PASS] Commit hash: {commit_hash}")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -183,7 +183,7 @@ class TestWorktreeMerge:
                             await manager.merge_worktree(epic_id=1)
                             assert False, "Should have raised WorktreeConflictError"
                         except WorktreeConflictError as e:
-                            print(f"✓ Correctly raised conflict error: {e}")
+                            print(f"[PASS] Correctly raised conflict error: {e}")
                             assert "conflict" in str(e).lower()
 
         finally:
@@ -226,7 +226,7 @@ class TestWorktreeCleanup:
                 await manager.cleanup_worktree(epic_id=1)
 
                 assert 1 not in manager._worktrees
-                print(f"✓ Cleaned up worktree for epic 1")
+                print(f"[PASS] Cleaned up worktree for epic 1")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -265,7 +265,7 @@ class TestWorktreeCleanup:
 
                 assert 1 not in manager._worktrees
                 assert not worktree_path.exists()
-                print(f"✓ Removed directory despite git failure")
+                print(f"[PASS] Removed directory despite git failure")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -290,12 +290,12 @@ class TestBranchNameSanitization:
             # Test special characters
             result = manager._sanitize_branch_name("My Epic Task!")
             assert result == "my-epic-task"
-            print(f"✓ 'My Epic Task!' -> '{result}'")
+            print(f"[PASS] 'My Epic Task!' -> '{result}'")
 
             # Test spaces
             result = manager._sanitize_branch_name("Add User Auth")
             assert result == "add-user-auth"
-            print(f"✓ 'Add User Auth' -> '{result}'")
+            print(f"[PASS] 'Add User Auth' -> '{result}'")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -321,7 +321,7 @@ class TestBranchNameSanitization:
                 assert result != name.lower(), f"Should rename reserved name {name}"
                 # Implementation prefixes with 'epic-'
                 assert result == f'epic-{name.lower()}', f"Expected 'epic-{name.lower()}', got '{result}'"
-                print(f"✓ Reserved '{name}' sanitized to '{result}'")
+                print(f"[PASS] Reserved '{name}' sanitized to '{result}'")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -353,7 +353,7 @@ class TestBranchNameSanitization:
                 invalid_chars = ':*?"<>|\\/'
                 for char in invalid_chars:
                     assert char not in result, f"Invalid char '{char}' found in '{result}'"
-                print(f"✓ '{input_name}' -> '{result}'")
+                print(f"[PASS] '{input_name}' -> '{result}'")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -376,7 +376,7 @@ class TestBranchNameSanitization:
             result = manager._sanitize_branch_name(long_name)
 
             assert len(result) <= 200, f"Branch name too long: {len(result)}"
-            print(f"✓ Long name (300 chars) truncated to {len(result)} chars")
+            print(f"[PASS] Long name (300 chars) truncated to {len(result)} chars")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -416,7 +416,7 @@ class TestDatabaseSync:
 
                         # Verify database was called
                         assert mock_db.create_worktree.called
-                        print(f"✓ Database create_worktree called")
+                        print(f"[PASS] Database create_worktree called")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -464,7 +464,7 @@ class TestDatabaseSync:
 
                             # Verify database was called
                             assert mock_db.update_worktree.called
-                            print(f"✓ Database update_worktree called")
+                            print(f"[PASS] Database update_worktree called")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -515,7 +515,7 @@ class TestRecoveryFromInvalidState:
 
                 assert status['recovered_count'] == 1
                 assert 1 in manager._worktrees
-                print(f"✓ Recovered 1 worktree from database")
+                print(f"[PASS] Recovered 1 worktree from database")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -553,12 +553,12 @@ class TestConcurrentOperations:
 
                         assert len(worktrees) == 3
                         assert len(manager._worktrees) == 3
-                        print(f"✓ Created 3 worktrees concurrently")
+                        print(f"[PASS] Created 3 worktrees concurrently")
 
                         # Verify each has unique branch
                         branches = [w.branch for w in worktrees]
                         assert len(set(branches)) == 3
-                        print(f"✓ All worktrees have unique branches")
+                        print(f"[PASS] All worktrees have unique branches")
 
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -612,14 +612,14 @@ async def run_all_tests():
         print("[SUCCESS] ALL TESTS PASSED (14/14)")
         print("="*60)
         print("\nTest Coverage:")
-        print("  ✓ Worktree creation (with mocked git)")
-        print("  ✓ Worktree merge flow")
-        print("  ✓ Worktree cleanup")
-        print("  ✓ Conflict detection")
-        print("  ✓ Branch name sanitization (Windows reserved names, special chars)")
-        print("  ✓ Database sync on operations")
-        print("  ✓ Recovery from invalid state")
-        print("  ✓ Concurrent worktree operations")
+        print("  [PASS] Worktree creation (with mocked git)")
+        print("  [PASS] Worktree merge flow")
+        print("  [PASS] Worktree cleanup")
+        print("  [PASS] Conflict detection")
+        print("  [PASS] Branch name sanitization (Windows reserved names, special chars)")
+        print("  [PASS] Database sync on operations")
+        print("  [PASS] Recovery from invalid state")
+        print("  [PASS] Concurrent worktree operations")
 
         return True
 

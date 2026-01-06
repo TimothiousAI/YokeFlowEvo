@@ -317,8 +317,9 @@ class ParallelExecutor:
                     # Continue with other epics
 
             # Use asyncio.gather() with return_exceptions=True for parallel execution
-            # Create task coroutines
+            # Create task coroutines and track which task IDs are being executed
             task_coroutines = []
+            executed_task_ids = []  # Track IDs in same order as coroutines
             for task_id in task_ids:
                 if task_id not in tasks_by_id:
                     continue
@@ -332,6 +333,7 @@ class ParallelExecutor:
 
                 worktree_path = worktree_paths[epic_id]
                 task_coroutines.append(self._execute_task_with_semaphore(task, worktree_path))
+                executed_task_ids.append(task_id)  # Track in same order as coroutines
 
             # Execute all tasks in parallel (respecting semaphore)
             results = await asyncio.gather(*task_coroutines, return_exceptions=True)
@@ -340,8 +342,8 @@ class ParallelExecutor:
             execution_results = []
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    # Task execution raised an exception
-                    task_id = task_ids[i] if i < len(task_ids) else 0
+                    # Task execution raised an exception - use executed_task_ids for correct mapping
+                    task_id = executed_task_ids[i] if i < len(executed_task_ids) else 0
                     logger.error(f"Task {task_id} execution failed with exception: {result}")
                     execution_results.append(ExecutionResult(
                         task_id=task_id,
@@ -426,7 +428,7 @@ class ParallelExecutor:
             # For now, use default sonnet since ModelSelector needs config
             # This will be properly implemented when Config is available
             if self.model_selector:
-                recommendation = self.model_selector.recommend_model(task)
+                recommendation = await self.model_selector.recommend_model(task)
                 model = recommendation.model
                 logger.info(f"Model selected for task {task_id}: {model} ({recommendation.reasoning})")
             else:
