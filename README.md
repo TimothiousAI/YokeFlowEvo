@@ -24,7 +24,258 @@ Build complete applications using Claude across multiple autonomous sessions. Pr
 - ⚙️ YAML configuration file support
 - 🛑 Graceful shutdown handling (Ctrl+C properly finalizes sessions)
 
-**Originally forked from Anthropic's autonomous coding demo**, now evolved into YokeFlow with significant enhancements including API-first architecture, PostgreSQL database, agent orchestration, quality review system, and production-ready web interface.
+**Originally forked from Anthropic's autonomous coding demo**, now evolved into YokeFlow with significant enhancements including API-first architecture, PostgreSQL database, agent orchestration, quality review system, production-ready web interface, and **parallel task execution with git worktree isolation**.
+
+---
+
+## 🚀 Parallel Execution - Faster Development with Multiple Agents
+
+**NEW in v1.3.0**: YokeFlow now supports **parallel execution** where multiple AI agents work on different tasks simultaneously, dramatically reducing development time for large projects.
+
+### Key Features
+
+- ⚡ **10x Faster Development**: Run multiple tasks concurrently instead of sequentially
+- 🔒 **Git Worktree Isolation**: Each epic gets its own isolated worktree (no conflicts)
+- 📊 **Dependency Resolution**: Automatically computes task execution order using topological sorting
+- 🎯 **Smart Batching**: Groups independent tasks that can run in parallel
+- 💰 **Cost-Aware**: Tracks costs across all concurrent agents
+- 🛡️ **Safe Merging**: Automatic merge with conflict detection and recovery
+
+### Quick Start
+
+```bash
+# Enable parallel execution with default settings (3 concurrent agents)
+python scripts/run_self_enhancement.py --coding --parallel
+
+# Customize concurrency (1-10 agents)
+python scripts/run_self_enhancement.py --coding --parallel --max-concurrency 5
+
+# Use squash merge strategy for cleaner git history
+python scripts/run_self_enhancement.py --coding --parallel --merge-strategy squash
+```
+
+### How It Works
+
+**Sequential Mode (default):**
+```
+Session 1: Task A → Task B → Task C → Task D → Task E
+Time: 5 sessions × 3 minutes = 15 minutes
+```
+
+**Parallel Mode (opt-in):**
+```
+Batch 1: Task A, Task B, Task C (no dependencies, run concurrently)
+Batch 2: Task D, Task E (depend on Batch 1, run after)
+Time: 2 batches × 3 minutes = 6 minutes
+```
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Main Repository                           │
+│  (PostgreSQL tracks all tasks, dependencies, and state)      │
+└──────────────┬──────────────────────────────────────────────┘
+               │
+    ┌──────────┴──────────┬──────────────┬──────────────┐
+    │                     │              │              │
+┌───▼────────┐    ┌───────▼───┐  ┌──────▼────┐  ┌─────▼──────┐
+│ Worktree 1 │    │ Worktree 2│  │Worktree 3 │  │ Worktree N │
+│  (Epic A)  │    │  (Epic B) │  │ (Epic C)  │  │ (Epic N)   │
+│            │    │           │  │           │  │            │
+│  Agent 1   │    │  Agent 2  │  │ Agent 3   │  │  Agent N   │
+│  Task 1    │    │  Task 5   │  │ Task 9    │  │  Task ...  │
+└─────┬──────┘    └─────┬─────┘  └─────┬─────┘  └──────┬─────┘
+      │                 │              │               │
+      └─────────────────┴──────────────┴───────────────┘
+                         │
+                   Merge back to main
+                   (automatic, with conflict detection)
+```
+
+**Components:**
+
+1. **DependencyResolver**: Analyzes task dependencies using Kahn's algorithm (topological sorting)
+   - Detects circular dependencies
+   - Computes parallel execution batches
+   - Respects hard (blocking) and soft (non-blocking) dependencies
+   - Orders tasks by priority within each batch
+
+2. **WorktreeManager**: Creates isolated git worktrees per epic
+   - One worktree per epic (not per task) to reduce git overhead
+   - Windows-safe branch naming (handles reserved names like CON, PRN)
+   - Automatic cleanup after merge
+   - Conflict detection and recovery
+
+3. **ParallelExecutor**: Orchestrates concurrent agent execution
+   - Semaphore-based concurrency control (1-10 agents)
+   - Cost tracking across all agents
+   - Real-time progress updates
+   - Graceful failure handling
+
+### Declaring Dependencies
+
+Dependencies are declared in the task database. YokeFlow supports two types:
+
+**Hard Dependencies (blocking):**
+```python
+# Task B cannot start until Task A is complete
+create_task(
+    epic_id=1,
+    description="Implement API endpoint",
+    action="...",
+    depends_on=[task_a_id],  # Task IDs this depends on
+    dependency_type='hard'    # Blocks execution (default)
+)
+```
+
+**Soft Dependencies (non-blocking):**
+```python
+# Task B should run after Task A, but won't block execution order
+create_task(
+    epic_id=1,
+    description="Write documentation",
+    action="...",
+    depends_on=[task_a_id],
+    dependency_type='soft'  # Informational only
+)
+```
+
+**Example dependency graph:**
+```
+Epic 1: Backend API
+  ├─ Task 1: Database schema (no dependencies)
+  ├─ Task 2: API models (depends on Task 1)
+  └─ Task 3: API endpoints (depends on Task 2)
+
+Epic 2: Frontend UI
+  ├─ Task 4: UI components (no dependencies)
+  └─ Task 5: API integration (depends on Task 3 in Epic 1)
+
+Execution Batches:
+  Batch 1: Task 1, Task 4 (parallel - different epics, no dependencies)
+  Batch 2: Task 2 (depends on Task 1)
+  Batch 3: Task 3 (depends on Task 2)
+  Batch 4: Task 5 (depends on Task 3)
+```
+
+### Configuration Options
+
+| Flag | Description | Default | Range |
+|------|-------------|---------|-------|
+| `--parallel` | Enable parallel execution | `false` (sequential) | - |
+| `--max-concurrency` | Number of concurrent agents | `3` | `1-10` |
+| `--merge-strategy` | Worktree merge strategy | `regular` | `regular`, `squash` |
+
+**Merge Strategies:**
+- `regular`: Standard git merge (preserves all commits from worktrees)
+- `squash`: Squash merge (combines all worktree commits into one clean commit)
+
+### Performance Considerations
+
+**When to use parallel execution:**
+- ✅ Projects with 50+ tasks across multiple epics
+- ✅ Tasks that are truly independent (different files, different features)
+- ✅ You have multiple CPU cores available
+- ✅ You want to maximize throughput over cost
+
+**When to use sequential execution:**
+- ✅ Small projects (<20 tasks)
+- ✅ Highly dependent tasks (everything builds on previous work)
+- ✅ Limited system resources
+- ✅ You want to minimize cost over speed
+
+**Cost implications:**
+- Parallel execution uses multiple agents concurrently
+- Cost per hour may be higher, but total time is reduced
+- Total token usage is similar (same tasks, just faster)
+- Use `--max-concurrency` to balance cost vs. speed
+
+### Troubleshooting
+
+**Merge conflicts:**
+```bash
+# ParallelExecutor detects conflicts automatically
+# Check worktree status
+git worktree list
+
+# Manually resolve conflicts in worktree
+cd .worktrees/epic-42-feature-name
+git status
+# Fix conflicts, then:
+git add .
+git commit -m "Resolve merge conflicts"
+
+# Resume parallel execution (will retry merge)
+python scripts/run_self_enhancement.py --coding --parallel
+```
+
+**Worktree cleanup:**
+```bash
+# List all worktrees
+git worktree list
+
+# Remove stale worktree
+git worktree remove .worktrees/epic-42-feature-name
+
+# Prune deleted worktrees
+git worktree prune
+```
+
+**Database state recovery:**
+```python
+# WorktreeManager can recover state after crashes
+from core.parallel.worktree_manager import WorktreeManager
+
+manager = WorktreeManager(project_path="generations/my_project", project_id=project_id)
+await manager.recover_state()
+# Returns: {recovered_count, cleaned_count, errors}
+```
+
+**Circular dependency errors:**
+```bash
+# DependencyResolver detects circular dependencies
+# Error message will show: "Circular dependencies detected: [task_id_1, task_id_2, ...]"
+
+# Fix by reviewing and removing circular dependencies in task declarations
+# Use soft dependencies if tasks reference each other but don't block
+```
+
+**Performance issues:**
+- Reduce `--max-concurrency` if system is overloaded (try 1-2 agents)
+- Check CPU/memory usage with `top` or `htop`
+- Ensure Docker has sufficient resources allocated
+- Use `--merge-strategy squash` for cleaner git history (fewer objects)
+
+### Advanced: Dependency Visualization
+
+```python
+# Generate dependency graph visualization
+from core.parallel.dependency_resolver import DependencyResolver
+
+resolver = DependencyResolver(db_connection)
+tasks = await db.list_tasks(project_id)
+graph = resolver.resolve(tasks)
+
+# Generate Mermaid diagram
+mermaid = resolver.visualize_dependencies(format='mermaid')
+print(mermaid)
+
+# Generate ASCII art
+ascii_art = resolver.visualize_dependencies(format='ascii')
+print(ascii_art)
+```
+
+Output:
+```mermaid
+graph TD
+  Task1[Task 1: Database Schema] --> Task2[Task 2: API Models]
+  Task2 --> Task3[Task 3: API Endpoints]
+  Task4[Task 4: UI Components]
+  Task3 --> Task5[Task 5: API Integration]
+```
+
+For detailed implementation documentation, see [docs/parallel-execution.md](docs/parallel-execution.md).
 
 ---
 
