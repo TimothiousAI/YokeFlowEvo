@@ -43,13 +43,15 @@ class SessionManager:
     def setup_handlers(self):
         """Set up signal handlers for graceful shutdown."""
         self._original_sigint = signal.signal(signal.SIGINT, self._handle_interrupt)
-        self._original_sigterm = signal.signal(signal.SIGTERM, self._handle_interrupt)
+        # SIGTERM only exists on Unix systems, not on Windows
+        if hasattr(signal, 'SIGTERM'):
+            self._original_sigterm = signal.signal(signal.SIGTERM, self._handle_interrupt)
 
     def restore_handlers(self):
         """Restore original signal handlers."""
         if self._original_sigint:
             signal.signal(signal.SIGINT, self._original_sigint)
-        if self._original_sigterm:
+        if self._original_sigterm and hasattr(signal, 'SIGTERM'):
             signal.signal(signal.SIGTERM, self._original_sigterm)
 
     def _handle_interrupt(self, signum, frame):
@@ -60,7 +62,10 @@ class SessionManager:
             raise KeyboardInterrupt("Force interrupt")
 
         self.interrupted = True
-        signal_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
+        # Handle signal name detection (SIGTERM doesn't exist on Windows)
+        signal_name = "SIGINT"
+        if hasattr(signal, 'SIGTERM') and signum == signal.SIGTERM:
+            signal_name = "SIGTERM"
 
         print(f"\n\n{'='*70}")
         print(f"  Received {signal_name} - Shutting down gracefully...")

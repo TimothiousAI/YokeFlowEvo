@@ -12,7 +12,47 @@ This file provides guidance to Claude Code when working with this repository.
 
 **Workflow**: Opus plans roadmap (Session 0) → Sonnet implements features (Sessions 1+)
 
-## Core Workflow
+## How to Work on YokeFlow (IMPORTANT)
+
+When implementing features or fixing bugs in YokeFlow itself, follow this workflow:
+
+### 1. Consult Domain Expertise First
+Before writing code, read the relevant expertise files:
+```
+.claude/commands/experts/{domain}/expertise.yaml
+```
+Domains: `backend`, `frontend`, `database`, `orchestration`, `mcp`, `testing`
+
+### 2. Use Commands for Structured Work
+- `/plan <feature>` → Generate spec in `specs/`
+- `/build <spec>` → Implement (parallel capable)
+- `/review` → Risk-tiered code review
+- `/fix <review>` → Auto-fix issues
+
+### 3. Spawn Sub-Agents for Parallel Work
+```
+.claude/agents/
+├── planner-agent.md   (Opus - planning)
+├── build-agent.md     (Sonnet - implementation)
+├── scout-agent.md     (Haiku - investigation)
+├── reviewer-agent.md  (Sonnet - review)
+└── merge-agent.md     (Sonnet - merging)
+```
+
+### 4. Update Expertise After Implementation
+If you discover new patterns, update the relevant `expertise.yaml`.
+
+### 5. Use Output Directories
+- `specs/` - Implementation plans
+- `reviews/` - Code review reports
+- `fix-reports/` - Fix reports
+- `build-reports/` - Build reports
+
+**Run `/prime` to load full context at session start.**
+
+---
+
+## Core Workflow (Generated Projects)
 
 **Session 0 (Initialization)**: Reads `app_spec.txt` → Creates epics/tasks/tests in PostgreSQL → Runs `init.sh`
 
@@ -98,6 +138,42 @@ yokeflow/
 └── generations/             # Generated projects
 ```
 
+## Domain Expertise & Skills (.claude/)
+
+YokeFlow uses the ADWS pattern for domain expertise and Claude SDK skills:
+
+```
+.claude/
+├── settings.json              # Project settings and thresholds
+├── skills/                    # Native Claude SDK skills
+│   ├── implement-feature/     # Feature implementation skill
+│   ├── review-code/           # Code review skill
+│   └── debug-issue/           # Debugging skill
+└── commands/experts/          # Domain expertise
+    ├── backend/               # FastAPI, async Python
+    ├── frontend/              # Next.js, React, TypeScript
+    ├── database/              # PostgreSQL, asyncpg
+    ├── orchestration/         # Agent management, sessions
+    ├── mcp/                   # Model Context Protocol
+    └── testing/               # pytest, async tests
+```
+
+**Each domain expert contains**:
+- `expertise.yaml` - Patterns, anti-patterns, stack info
+- `question.md` - How to query this expert
+- `self-improve.md` - When/how to update expertise
+
+**Expertise Workflow**:
+1. Route task to appropriate domain expert
+2. Consult `expertise.yaml` for patterns
+3. Implement following established patterns
+4. If new pattern discovered, update `expertise.yaml`
+5. When confidence > 0.8 and usage > 10, generate skill
+
+**Skills vs Expertise**:
+- **Expertise**: Domain knowledge that evolves (yaml files)
+- **Skills**: Condensed, actionable procedures (SKILL.md)
+
 ## Key Design Decisions
 
 **PostgreSQL**: Production-ready, async operations, JSONB metadata, UUID-based IDs
@@ -154,6 +230,13 @@ python tests/test_orchestrator.py        # Orchestrator
 - Phase 4: `review/prompt_improvement_analyzer.py` - Prompt improvements ✅ **RESTORED** (feature branch)
 
 ## Recent Changes
+
+**January 6, 2026**:
+- ✅ **ADWS Pattern Adopted**: Domain expertise structure in `.claude/commands/experts/`
+- ✅ **Native Skills Created**: `implement-feature`, `review-code`, `debug-issue` skills
+- ✅ **6 Domain Experts**: backend, frontend, database, orchestration, mcp, testing
+- ✅ **Parallel Execution v2 Roadmap**: 5 epics, 32 tasks for automatic parallel mode
+- 🚧 **In Progress**: Phase 1-5 implementation for default parallel execution
 
 **December 29, 2025 - v1.2.0 Release**:
 - ✅ **Playwright Browser Automation**: Full browser testing within Docker containers

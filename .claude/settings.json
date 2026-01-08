@@ -1,0 +1,66 @@
+{
+  "project": "yokeflow",
+  "version": "1.2.0",
+  "domains": [
+    "backend",
+    "frontend",
+    "database",
+    "orchestration",
+    "mcp",
+    "testing"
+  ],
+  "expertise_threshold": {
+    "confidence": 0.8,
+    "usage_count": 10
+  },
+  "auto_improve": true,
+  "skill_generation": true,
+  "agents": {
+    "build-agent": {
+      "model": "sonnet",
+      "max_concurrent": 4,
+      "timeout_minutes": 30
+    },
+    "scout-agent": {
+      "model": "haiku",
+      "max_concurrent": 8,
+      "timeout_minutes": 5
+    },
+    "reviewer-agent": {
+      "model": "sonnet",
+      "max_concurrent": 2,
+      "timeout_minutes": 15
+    },
+    "merge-agent": {
+      "model": "sonnet",
+      "max_concurrent": 1,
+      "timeout_minutes": 10
+    },
+    "planner-agent": {
+      "model": "opus",
+      "max_concurrent": 1,
+      "timeout_minutes": 20
+    }
+  },
+  "parallel_execution": {
+    "max_worktrees": 4,
+    "merge_strategy": "no-ff",
+    "auto_cleanup": true,
+    "test_before_merge": true
+  },
+  "output_directories": {
+    "specs": "specs/",
+    "reviews": "reviews/",
+    "fix_reports": "fix-reports/",
+    "build_reports": "build-reports/",
+    "merge_reports": "merge-reports/"
+  },
+  "hooks": {
+    "PreToolUse": [],
+    "PostToolUse": [],
+    "Stop": [],
+    "Notification": [],
+    "SubagentStop": [],
+    "UserPromptSubmit": []
+  }
+}

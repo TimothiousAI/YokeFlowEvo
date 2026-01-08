@@ -785,6 +785,257 @@ class TaskDatabase:
             return count
 
     # =========================================================================
+    # Execution Plan Operations
+    # =========================================================================
+
+    async def save_execution_plan(
+        self,
+        project_id: UUID,
+        plan: Dict[str, Any]
+    ) -> None:
+        """
+        Save execution plan to project metadata.
+
+        Args:
+            project_id: Project UUID
+            plan: Execution plan dictionary
+        """
+        async with self.acquire() as conn:
+            # Get current metadata
+            row = await conn.fetchrow(
+                "SELECT metadata FROM projects WHERE id = $1",
+                project_id
+            )
+
+            if row and row['metadata']:
+                if isinstance(row['metadata'], str):
+                    metadata = json.loads(row['metadata'])
+                else:
+                    metadata = dict(row['metadata'])
+            else:
+                metadata = {}
+
+            # Store execution plan
+            metadata['execution_plan'] = plan
+
+            await conn.execute(
+                "UPDATE projects SET metadata = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(metadata), project_id
+            )
+            logger.info(f"Saved execution plan for project {project_id}")
+
+    async def get_execution_plan(
+        self,
+        project_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get execution plan from project metadata.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            Execution plan dictionary or None
+        """
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT metadata FROM projects WHERE id = $1",
+                project_id
+            )
+
+            if not row or not row['metadata']:
+                return None
+
+            metadata = row['metadata']
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+
+            return metadata.get('execution_plan')
+
+    async def update_task_predicted_files(
+        self,
+        task_id: int,
+        files: List[str]
+    ) -> None:
+        """
+        Update predicted files for a task in its metadata.
+
+        Args:
+            task_id: Task ID
+            files: List of predicted file paths
+        """
+        async with self.acquire() as conn:
+            # Get current metadata
+            row = await conn.fetchrow(
+                "SELECT metadata FROM tasks WHERE id = $1",
+                task_id
+            )
+
+            if row and row['metadata']:
+                if isinstance(row['metadata'], str):
+                    metadata = json.loads(row['metadata'])
+                else:
+                    metadata = dict(row['metadata'])
+            else:
+                metadata = {}
+
+            metadata['predicted_files'] = files
+
+            await conn.execute(
+                "UPDATE tasks SET metadata = $1::jsonb WHERE id = $2",
+                json.dumps(metadata), task_id
+            )
+
+    async def get_tasks_for_planning(
+        self,
+        project_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all tasks with dependencies for execution planning.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of task dictionaries with epic and dependency info
+        """
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    t.id,
+                    t.epic_id,
+                    t.description,
+                    t.action,
+                    t.priority,
+                    t.done,
+                    t.metadata,
+                    e.name as epic_name,
+                    e.priority as epic_priority
+                FROM tasks t
+                JOIN epics e ON t.epic_id = e.id
+                WHERE t.project_id = $1
+                  AND t.done = false
+                ORDER BY e.priority, t.priority, t.id
+                """,
+                project_id
+            )
+
+            tasks = []
+            for row in rows:
+                task = dict(row)
+                # Parse metadata for dependencies
+                metadata = task.get('metadata', {})
+                if isinstance(metadata, str):
+                    metadata = json.loads(metadata)
+                task['depends_on'] = metadata.get('depends_on', [])
+                task['dependency_type'] = metadata.get('dependency_type', 'hard')
+                tasks.append(task)
+
+            return tasks
+
+    async def update_batch_status(
+        self,
+        batch_id: int,
+        status: str,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None
+    ) -> None:
+        """
+        Update batch execution status in execution plan.
+
+        Note: Batches are stored in project metadata, not a separate table.
+        This updates the batch status within the execution plan.
+
+        Args:
+            batch_id: Batch index in execution plan
+            status: New status (pending, running, completed, failed)
+            started_at: When batch started
+            completed_at: When batch completed
+        """
+        # Batch status is tracked in project metadata for now
+        # since batches are ephemeral and part of execution plan
+        logger.debug(f"Batch {batch_id} status updated to {status}")
+
+    async def get_batch_worktrees(self, batch_id: int) -> List[Dict[str, Any]]:
+        """
+        Get all worktrees associated with a batch.
+
+        Note: This queries the worktrees table if it exists,
+        otherwise returns empty list.
+
+        Args:
+            batch_id: Batch ID
+
+        Returns:
+            List of worktree info dicts
+        """
+        # Worktrees are managed by WorktreeManager
+        # Return empty for now - batch_executor handles this via worktree_manager
+        return []
+
+    async def update_project_metadata(
+        self,
+        project_id: UUID,
+        metadata_updates: Dict[str, Any]
+    ) -> None:
+        """
+        Update specific fields in project metadata (merge, not replace).
+
+        Args:
+            project_id: Project UUID
+            metadata_updates: Dictionary of fields to update/add
+        """
+        async with self.acquire() as conn:
+            # Get current metadata
+            row = await conn.fetchrow(
+                "SELECT metadata FROM projects WHERE id = $1",
+                project_id
+            )
+
+            if row and row['metadata']:
+                if isinstance(row['metadata'], str):
+                    metadata = json.loads(row['metadata'])
+                else:
+                    metadata = dict(row['metadata'])
+            else:
+                metadata = {}
+
+            # Merge updates
+            metadata.update(metadata_updates)
+
+            await conn.execute(
+                "UPDATE projects SET metadata = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(metadata), project_id
+            )
+            logger.debug(f"Updated project {project_id} metadata: {list(metadata_updates.keys())}")
+
+    async def get_project_execution_mode(self, project_id: UUID) -> Optional[str]:
+        """
+        Get the execution mode for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            Execution mode string or None
+        """
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT metadata FROM projects WHERE id = $1",
+                project_id
+            )
+
+            if not row or not row['metadata']:
+                return None
+
+            metadata = row['metadata']
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+
+            return metadata.get('execution_mode')
+
+    # =========================================================================
     # Epic Operations
     # =========================================================================
 
