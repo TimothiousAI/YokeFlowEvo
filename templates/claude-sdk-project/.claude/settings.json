@@ -1,0 +1,11 @@
+{
+  "model": "claude-sonnet-4-20250514",
+  "permissions": {
+    "allow_bash": true,
+    "allow_file_write": true
+  },
+  "project": {
+    "name": "{{PROJECT_NAME}}",
+    "description": "{{PROJECT_DESCRIPTION}}"
+  }
+}

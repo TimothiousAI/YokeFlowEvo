@@ -1,0 +1,71 @@
+# Backend Python Domain Expertise
+# Pre-built template for Python backend projects
+
+domain: backend
+description: Python backend with FastAPI/Flask, async operations, REST APIs
+confidence: 0.6
+usage_count: 0
+last_updated: "{{ created_date }}"
+
+stack:
+  framework: "FastAPI / Flask"
+  language: "Python 3.10+"
+  async: "asyncio / async-await"
+  validation: "Pydantic"
+
+files: {}
+
+patterns:
+  - name: async_endpoint
+    description: Use async for I/O-bound operations
+    example: |
+      @app.get("/items/{item_id}")
+      async def get_item(item_id: int):
+          item = await db.fetch_one(item_id)
+          if not item:
+              raise HTTPException(status_code=404)
+          return item
+
+  - name: pydantic_models
+    description: Use Pydantic for request/response validation
+    example: |
+      from pydantic import BaseModel, Field
+
+      class CreateItem(BaseModel):
+          name: str = Field(..., min_length=1)
+          price: float = Field(..., gt=0)
+
+      class ItemResponse(BaseModel):
+          id: int
+          name: str
+          price: float
+
+  - name: dependency_injection
+    description: Use FastAPI dependencies for shared logic
+    example: |
+      async def get_db():
+          db = Database()
+          try:
+              yield db
+          finally:
+              await db.close()
+
+      @app.get("/items")
+      async def list_items(db: Database = Depends(get_db)):
+          return await db.fetch_all()
+
+anti_patterns:
+  - name: sync_in_async
+    description: Never use blocking calls in async functions
+    bad: "requests.get(url)"
+    good: "await httpx.AsyncClient().get(url)"
+
+  - name: bare_except
+    description: Never use bare except clauses
+    bad: "except:"
+    good: "except ValueError as e:"
+
+imports:
+  - "from fastapi import FastAPI, HTTPException, Depends"
+  - "from pydantic import BaseModel, Field"
+  - "import asyncio"

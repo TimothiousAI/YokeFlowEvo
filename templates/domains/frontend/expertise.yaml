@@ -1,0 +1,60 @@
+# Frontend Domain Expertise
+# Pre-built template for React/Next.js projects
+
+domain: frontend
+description: React components, Next.js pages, TypeScript, CSS/Tailwind
+confidence: 0.6
+usage_count: 0
+last_updated: "{{ created_date }}"
+
+stack:
+  framework: "React / Next.js"
+  language: "TypeScript"
+  styling: "Tailwind CSS / CSS Modules"
+  state: "React hooks / Context"
+
+files: {}
+
+patterns:
+  - name: functional_component
+    description: Use functional components with hooks
+    example: |
+      interface Props {
+        title: string;
+        onClick?: () => void;
+      }
+
+      export function MyComponent({ title, onClick }: Props) {
+        const [state, setState] = useState(null);
+        return <div onClick={onClick}>{title}</div>;
+      }
+
+  - name: use_effect_cleanup
+    description: Always cleanup side effects
+    example: |
+      useEffect(() => {
+        const subscription = subscribe();
+        return () => subscription.unsubscribe();
+      }, [dependency]);
+
+  - name: conditional_rendering
+    description: Use early returns or ternary for conditionals
+    example: |
+      if (isLoading) return <Spinner />;
+      if (error) return <Error message={error} />;
+      return <Content data={data} />;
+
+anti_patterns:
+  - name: inline_styles
+    description: Avoid inline styles, use Tailwind or CSS modules
+    bad: "<div style={{color: 'red'}}>Text</div>"
+    good: "<div className=\"text-red-500\">Text</div>"
+
+  - name: prop_drilling
+    description: Avoid passing props through many layers
+    bad: "<A><B data={x}><C data={x}><D data={x}/></C></B></A>"
+    good: "Use Context or composition"
+
+imports:
+  - "import { useState, useEffect, useCallback } from 'react'"
+  - "import type { FC, ReactNode } from 'react'"

@@ -1,0 +1,32 @@
+# {{ domain | title }} Expert Query Template
+
+Use this expert when working on {{ domain }}-related tasks.
+
+## Query Format
+
+```
+Domain: {{ domain }}
+Task: [describe what you're implementing]
+Context: [relevant files or existing patterns]
+Question: [specific question about implementation]
+```
+
+## Routing Rules
+
+Route to this expert when:
+{% for rule in routing_rules %}
+- {{ rule }}
+{% endfor %}
+
+## Example Queries
+
+```
+Domain: {{ domain }}
+Task: [Example task for this domain]
+Context: [Example context]
+Question: How should I implement this?
+```
+
+---
+
+*This template was auto-generated. Update with project-specific examples as patterns emerge.*

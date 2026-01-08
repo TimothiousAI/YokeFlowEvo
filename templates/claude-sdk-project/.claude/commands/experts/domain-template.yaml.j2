@@ -1,0 +1,45 @@
+# {{ domain | title }} Domain Expertise
+# Auto-generated for {{ project_name }}
+
+domain: {{ domain }}
+description: {{ description }}
+confidence: 0.5
+usage_count: 0
+last_updated: {{ created_date }}
+
+# Core technologies
+stack:
+{% for tech in technologies %}
+  {{ tech.key }}: {{ tech.value }}
+{% endfor %}
+
+# Key files (discovered during development)
+files: {}
+
+# Patterns learned (grows as project develops)
+patterns: []
+
+# Anti-patterns to avoid
+anti_patterns: []
+
+# Common imports for this domain
+imports: []
+
+# Notes
+# -----
+# This expertise file was auto-generated during project initialization.
+# It will be updated as the coding agent discovers patterns during implementation.
+#
+# To manually add a pattern:
+# patterns:
+#   - name: pattern_name
+#     description: What this pattern does
+#     example: |
+#       # Code example
+#
+# To add an anti-pattern:
+# anti_patterns:
+#   - name: anti_pattern_name
+#     description: Why this is bad
+#     bad: "Bad code example"
+#     good: "Good code example"

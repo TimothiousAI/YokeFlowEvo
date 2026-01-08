@@ -1110,6 +1110,19 @@ class AgentOrchestrator:
                 if is_initializer and status != "error":
                     await self.quality.run_test_coverage_analysis(project_id, db)
 
+                    # Build execution plan after successful initialization
+                    await self._build_execution_plan(project_id, db, session_logger)
+
+                    # Determine execution mode based on plan
+                    await self._select_execution_mode(project_id, db, session_logger)
+
+                    # Bootstrap project with Claude SDK structure
+                    await self._bootstrap_project_structure(project_id, project_path, db, session_logger)
+
+                # Export updated expertise to files after successful sessions
+                if status != "error":
+                    await self._export_expertise_to_files(project_id, project_path, db, session_logger)
+
                 # Clear logger from session manager
                 session_manager.set_current_logger(None)
 
@@ -1178,6 +1191,362 @@ class AgentOrchestrator:
                     del self.session_managers[str(session_id)]
 
             return session_info
+
+    async def _build_execution_plan(
+        self,
+        project_id: UUID,
+        db: "TaskDatabase",
+        session_logger: Optional[Any] = None
+    ) -> None:
+        """
+        Build and store execution plan after initialization.
+
+        This creates an execution plan that determines:
+        - Parallel batches (which tasks can run concurrently)
+        - File conflict predictions (which tasks might modify same files)
+        - Worktree assignments (pre-assign tasks to worktrees by epic)
+
+        Args:
+            project_id: The project UUID
+            db: Database connection
+            session_logger: Optional logger for session events
+        """
+        from core.execution_plan import ExecutionPlanBuilder
+
+        try:
+            logger.info(f"Building execution plan for project {project_id}")
+
+            builder = ExecutionPlanBuilder(db)
+            plan = await builder.build_plan(project_id)
+
+            # Save plan to database
+            await db.save_execution_plan(project_id, plan.to_dict())
+
+            # Log summary
+            total_tasks = sum(len(b.task_ids) for b in plan.batches)
+            parallel_batches = sum(1 for b in plan.batches if b.can_parallel)
+            conflicts_count = len(plan.predicted_conflicts)
+
+            logger.info(
+                f"Execution plan built: {len(plan.batches)} batches, "
+                f"{total_tasks} tasks, {parallel_batches} parallel batches, "
+                f"{conflicts_count} conflicts detected"
+            )
+
+            if session_logger:
+                session_logger.log_event("execution_plan_built", {
+                    "batches": len(plan.batches),
+                    "total_tasks": total_tasks,
+                    "parallel_batches": parallel_batches,
+                    "conflicts_detected": conflicts_count,
+                    "worktree_assignments": len(plan.worktree_assignments)
+                })
+
+        except Exception as e:
+            logger.error(f"Failed to build execution plan: {e}", exc_info=True)
+            # Don't fail the session if plan building fails
+            if session_logger:
+                session_logger.log_event("execution_plan_error", {
+                    "error": str(e)
+                })
+
+    async def _select_execution_mode(
+        self,
+        project_id: UUID,
+        db: "TaskDatabase",
+        session_logger: Optional[Any] = None
+    ) -> None:
+        """
+        Determine and store execution mode based on execution plan.
+
+        Analyzes the execution plan to decide whether to use parallel
+        or sequential execution for subsequent sessions.
+
+        Args:
+            project_id: The project UUID
+            db: Database connection
+            session_logger: Optional logger for session events
+        """
+        try:
+            plan = await db.get_execution_plan(project_id)
+
+            if plan and self._should_use_parallel(plan):
+                mode = 'parallel'
+                logger.info(f"Project {project_id} will use parallel execution")
+            else:
+                mode = 'sequential'
+                logger.info(f"Project {project_id} will use sequential execution")
+
+            # Store mode in project metadata
+            await db.update_project_metadata(project_id, {
+                'execution_mode': mode,
+                'mode_selected_at': datetime.now().isoformat()
+            })
+
+            if session_logger:
+                session_logger.log_event("execution_mode_selected", {
+                    "mode": mode,
+                    "has_plan": plan is not None
+                })
+
+        except Exception as e:
+            logger.error(f"Failed to select execution mode: {e}", exc_info=True)
+            # Default to sequential on error
+            try:
+                await db.update_project_metadata(project_id, {
+                    'execution_mode': 'sequential'
+                })
+            except Exception:
+                pass
+
+    def _should_use_parallel(self, plan: Dict[str, Any]) -> bool:
+        """
+        Determine if parallel execution should be used.
+
+        Conditions for parallel mode:
+        - At least one batch has can_parallel=True
+        - At least one batch has > 1 task
+        - No critical conflicts in first batch
+
+        Args:
+            plan: Execution plan dictionary
+
+        Returns:
+            True if parallel execution should be used
+        """
+        if not plan or 'batches' not in plan:
+            return False
+
+        batches = plan.get('batches', [])
+        if not batches:
+            return False
+
+        # Check for parallel-capable batches with multiple tasks
+        parallel_batches = [
+            b for b in batches
+            if b.get('can_parallel') and len(b.get('task_ids', [])) > 1
+        ]
+
+        return len(parallel_batches) > 0
+
+    async def _bootstrap_project_structure(
+        self,
+        project_id: UUID,
+        project_path: str,
+        db: "TaskDatabase",
+        session_logger: Optional[Any] = None
+    ) -> None:
+        """
+        Bootstrap Claude SDK structure for new project.
+
+        Creates .claude/ directory structure, generates CLAUDE.md from app_spec,
+        and creates domain expert stubs based on detected technologies.
+
+        Args:
+            project_id: The project UUID
+            project_path: Path to project directory
+            db: Database connection
+            session_logger: Optional logger for session events
+        """
+        try:
+            from core.bootstrap.project_bootstrapper import ProjectBootstrapper
+            from pathlib import Path
+
+            # Read app_spec
+            app_spec_path = Path(project_path) / 'app_spec.txt'
+            if not app_spec_path.exists():
+                logger.debug("No app_spec.txt found, skipping bootstrap")
+                return
+
+            app_spec = app_spec_path.read_text(encoding='utf-8')
+            project = await db.get_project(project_id)
+
+            if not project:
+                logger.warning(f"Project not found: {project_id}")
+                return
+
+            bootstrapper = ProjectBootstrapper()
+            result = await bootstrapper.bootstrap(
+                project_path=project_path,
+                app_spec=app_spec,
+                project_name=project['name']
+            )
+
+            if result.success:
+                logger.info(
+                    f"Bootstrapped project: {len(result.files_created)} files, "
+                    f"{len(result.domains_initialized)} domains"
+                )
+                if session_logger:
+                    session_logger.log_event("project_bootstrapped", {
+                        "files_created": len(result.files_created),
+                        "domains_initialized": result.domains_initialized,
+                        "claude_md_generated": result.claude_md_generated
+                    })
+            else:
+                logger.warning(f"Bootstrap had errors: {result.errors}")
+                if session_logger:
+                    session_logger.log_event("bootstrap_errors", {
+                        "errors": result.errors
+                    })
+
+        except Exception as e:
+            logger.debug(f"Bootstrap skipped: {e}")
+            # Don't fail session for bootstrap errors
+
+    async def _export_expertise_to_files(
+        self,
+        project_id: UUID,
+        project_path: str,
+        db: "TaskDatabase",
+        session_logger: Optional[Any] = None
+    ) -> None:
+        """
+        Export updated expertise to files after session.
+
+        Syncs database expertise to .claude/commands/experts/ files
+        and generates native skills for mature expertise.
+
+        Args:
+            project_id: The project UUID
+            project_path: Path to project directory
+            db: Database connection
+            session_logger: Optional logger for session events
+        """
+        try:
+            from core.learning.expertise_sync import ExpertiseSyncService
+
+            sync_service = ExpertiseSyncService(project_path, project_id, db)
+            result = await sync_service.export_to_files(generate_skills=True)
+
+            if result.domains_synced:
+                logger.info(f"Exported expertise for domains: {result.domains_synced}")
+
+            if result.skills_generated:
+                logger.info(f"Generated skills for: {result.skills_generated}")
+
+            if session_logger:
+                session_logger.log_event("expertise_exported", {
+                    "domains_synced": result.domains_synced,
+                    "skills_generated": result.skills_generated,
+                    "errors": result.errors
+                })
+
+        except Exception as e:
+            logger.warning(f"Failed to export expertise: {e}")
+            # Don't fail session for export errors
+            if session_logger:
+                session_logger.log_event("expertise_export_error", {
+                    "error": str(e)
+                })
+
+    async def start_parallel_execution(
+        self,
+        project_id: UUID,
+        progress_callback: Optional[Callable] = None
+    ) -> Dict[str, Any]:
+        """
+        Start parallel execution for a project using its execution plan.
+
+        This is called after Session 0 when parallel mode is selected,
+        or can be triggered manually via API.
+
+        Args:
+            project_id: Project UUID
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Execution result dictionary
+
+        Raises:
+            ValueError: If no execution plan found or project not found
+        """
+        from core.parallel.batch_executor import BatchExecutor
+        from core.execution_plan import ExecutionPlan
+
+        logger.info(f"Starting parallel execution for project {project_id}")
+
+        async with DatabaseManager() as db:
+            # Get execution plan
+            plan_dict = await db.get_execution_plan(project_id)
+            if not plan_dict:
+                raise ValueError("No execution plan found. Run initialization first.")
+
+            # Get project info
+            project = await db.get_project(project_id)
+            if not project:
+                raise ValueError(f"Project not found: {project_id}")
+
+            # Check not already running
+            mode = await db.get_project_execution_mode(project_id)
+            if mode == 'parallel_running':
+                raise ValueError("Parallel execution already in progress")
+
+            # Mark as running
+            await db.update_project_metadata(project_id, {
+                'execution_mode': 'parallel_running',
+                'parallel_started_at': datetime.now().isoformat()
+            })
+
+            try:
+                # Reconstruct plan from dict
+                plan = ExecutionPlan.from_dict(plan_dict)
+
+                # Get max_concurrency from config
+                max_concurrency = getattr(
+                    getattr(self.config, 'parallel', None),
+                    'max_concurrency',
+                    3
+                )
+
+                # Create batch executor
+                executor = BatchExecutor(
+                    project_id=project_id,
+                    project_path=project['local_path'],
+                    db=db,
+                    max_concurrency=max_concurrency,
+                    progress_callback=progress_callback
+                )
+
+                # Execute plan
+                result = await executor.execute_plan(plan)
+
+                # Update status
+                final_status = 'parallel_completed' if result.success else 'parallel_failed'
+                await db.update_project_metadata(project_id, {
+                    'execution_mode': final_status,
+                    'parallel_completed_at': datetime.now().isoformat(),
+                    'parallel_result': {
+                        'success': result.success,
+                        'batches_completed': result.batches_completed,
+                        'batches_total': result.batches_total,
+                        'total_duration': result.total_duration,
+                        'total_cost': result.total_cost
+                    }
+                })
+
+                logger.info(
+                    f"Parallel execution completed: success={result.success}, "
+                    f"{result.batches_completed}/{result.batches_total} batches"
+                )
+
+                return {
+                    'status': 'completed' if result.success else 'failed',
+                    'success': result.success,
+                    'batches_completed': result.batches_completed,
+                    'batches_total': result.batches_total,
+                    'total_duration': result.total_duration,
+                    'total_cost': result.total_cost,
+                    'stopped_early': result.stopped_early
+                }
+
+            except Exception as e:
+                logger.error(f"Parallel execution failed: {e}", exc_info=True)
+                await db.update_project_metadata(project_id, {
+                    'execution_mode': 'parallel_failed',
+                    'parallel_error': str(e)
+                })
+                raise
 
     async def stop_session(self, session_id: UUID, reason: str = "User requested stop") -> bool:
         """

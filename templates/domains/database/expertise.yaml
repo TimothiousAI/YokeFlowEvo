@@ -1,0 +1,63 @@
+# Database Domain Expertise
+# Pre-built template for database operations
+
+domain: database
+description: Database operations, queries, migrations, ORMs
+confidence: 0.6
+usage_count: 0
+last_updated: "{{ created_date }}"
+
+stack:
+  type: "PostgreSQL / SQLite / MySQL"
+  orm: "Prisma / SQLAlchemy / Drizzle"
+  migrations: "Framework migrations"
+
+files: {}
+
+patterns:
+  - name: parameterized_queries
+    description: Always use parameterized queries to prevent SQL injection
+    example: |
+      # Python (asyncpg)
+      await conn.fetch("SELECT * FROM users WHERE id = $1", user_id)
+
+      # Node.js (pg)
+      await pool.query('SELECT * FROM users WHERE id = $1', [userId])
+
+  - name: transaction_wrapper
+    description: Use transactions for multi-statement operations
+    example: |
+      # Python
+      async with db.transaction():
+          await db.execute(insert1)
+          await db.execute(insert2)
+
+      # Node.js
+      await db.transaction(async (tx) => {
+        await tx.insert(table1).values(data1);
+        await tx.insert(table2).values(data2);
+      });
+
+  - name: connection_pooling
+    description: Use connection pools, never create connections per request
+    example: |
+      # Create pool once at startup
+      pool = await asyncpg.create_pool(DATABASE_URL, min_size=5, max_size=20)
+
+      # Use pool for queries
+      async with pool.acquire() as conn:
+          result = await conn.fetch(query)
+
+anti_patterns:
+  - name: string_interpolation
+    description: Never interpolate values into SQL strings
+    bad: "f\"SELECT * FROM users WHERE id = '{user_id}'\""
+    good: "\"SELECT * FROM users WHERE id = $1\", user_id"
+
+  - name: n_plus_one
+    description: Avoid N+1 query patterns
+    bad: "for user in users: user.posts = await get_posts(user.id)"
+    good: "Use JOIN or batch loading"
+
+imports:
+  - "# Varies by ORM/driver"

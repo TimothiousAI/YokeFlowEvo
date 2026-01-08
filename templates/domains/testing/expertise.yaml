@@ -1,0 +1,80 @@
+# Testing Domain Expertise
+# Pre-built template for test patterns
+
+domain: testing
+description: Unit tests, integration tests, mocking, test patterns
+confidence: 0.6
+usage_count: 0
+last_updated: "{{ created_date }}"
+
+stack:
+  framework: "Jest / pytest / Vitest"
+  mocking: "Built-in mocks"
+  coverage: "Coverage reporting"
+
+files: {}
+
+patterns:
+  - name: arrange_act_assert
+    description: Structure tests with AAA pattern
+    example: |
+      test('should calculate total correctly', () => {
+        // Arrange
+        const items = [{ price: 10 }, { price: 20 }];
+
+        // Act
+        const total = calculateTotal(items);
+
+        // Assert
+        expect(total).toBe(30);
+      });
+
+  - name: mock_external
+    description: Mock external dependencies
+    example: |
+      // JavaScript
+      jest.mock('./api');
+      api.fetchUser.mockResolvedValue({ id: 1, name: 'Test' });
+
+      // Python
+      @patch('module.external_api')
+      def test_function(mock_api):
+          mock_api.return_value = {'id': 1}
+
+  - name: test_isolation
+    description: Each test should be independent
+    example: |
+      beforeEach(() => {
+        // Reset state before each test
+        db.clear();
+      });
+
+      afterEach(() => {
+        // Cleanup after each test
+        jest.clearAllMocks();
+      });
+
+  - name: descriptive_names
+    description: Test names should describe behavior
+    example: |
+      # Good
+      test('should return 404 when user not found')
+      test('should validate email format')
+
+      # Bad
+      test('test1')
+      test('user test')
+
+anti_patterns:
+  - name: test_pollution
+    description: Tests should not depend on each other
+    bad: "Test B relies on state from Test A"
+    good: "Each test sets up its own state"
+
+  - name: testing_implementation
+    description: Test behavior, not implementation details
+    bad: "expect(component.state.isLoading).toBe(true)"
+    good: "expect(screen.getByText('Loading...')).toBeInTheDocument()"
+
+imports:
+  - "# Varies by test framework"

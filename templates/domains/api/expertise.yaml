@@ -1,0 +1,78 @@
+# API Domain Expertise
+# Pre-built template for REST/GraphQL API design
+
+domain: api
+description: API design, REST conventions, error handling, documentation
+confidence: 0.6
+usage_count: 0
+last_updated: "{{ created_date }}"
+
+stack:
+  style: "REST / GraphQL"
+  format: "JSON"
+  auth: "JWT / OAuth2"
+  docs: "OpenAPI / Swagger"
+
+files: {}
+
+patterns:
+  - name: rest_conventions
+    description: Follow REST naming and HTTP method conventions
+    example: |
+      GET    /items          # List items
+      POST   /items          # Create item
+      GET    /items/{id}     # Get single item
+      PUT    /items/{id}     # Replace item
+      PATCH  /items/{id}     # Update item
+      DELETE /items/{id}     # Delete item
+
+  - name: error_response
+    description: Use consistent error response format
+    example: |
+      {
+        "error": {
+          "code": "VALIDATION_ERROR",
+          "message": "Invalid input",
+          "details": [
+            { "field": "email", "message": "Invalid email format" }
+          ]
+        }
+      }
+
+  - name: pagination
+    description: Use cursor or offset pagination for lists
+    example: |
+      # Request
+      GET /items?limit=20&cursor=abc123
+
+      # Response
+      {
+        "data": [...],
+        "pagination": {
+          "next_cursor": "def456",
+          "has_more": true
+        }
+      }
+
+  - name: versioning
+    description: Version APIs for backward compatibility
+    example: |
+      # URL versioning
+      /api/v1/items
+      /api/v2/items
+
+      # Header versioning
+      Accept: application/vnd.api+json; version=2
+
+anti_patterns:
+  - name: verbs_in_urls
+    description: Don't use verbs in REST URLs
+    bad: "POST /items/create"
+    good: "POST /items"
+
+  - name: inconsistent_errors
+    description: Don't mix error formats
+    bad: "Sometimes { error: ... }, sometimes { message: ... }"
+    good: "Always use same error structure"
+
+imports: []

@@ -1,0 +1,76 @@
+# Backend Node.js Domain Expertise
+# Pre-built template for Node.js/Express projects
+
+domain: backend
+description: Node.js backend with Express, TypeScript, REST/GraphQL APIs
+confidence: 0.6
+usage_count: 0
+last_updated: "{{ created_date }}"
+
+stack:
+  framework: "Express / Fastify"
+  language: "TypeScript"
+  runtime: "Node.js 18+"
+  validation: "Zod / Joi"
+
+files: {}
+
+patterns:
+  - name: async_handler
+    description: Use async/await with proper error handling
+    example: |
+      app.get('/items/:id', async (req, res, next) => {
+        try {
+          const item = await db.findById(req.params.id);
+          if (!item) {
+            return res.status(404).json({ error: 'Not found' });
+          }
+          res.json(item);
+        } catch (error) {
+          next(error);
+        }
+      });
+
+  - name: middleware_pattern
+    description: Use middleware for cross-cutting concerns
+    example: |
+      const authMiddleware = async (req, res, next) => {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: 'Unauthorized' });
+        try {
+          req.user = await verifyToken(token);
+          next();
+        } catch {
+          res.status(401).json({ error: 'Invalid token' });
+        }
+      };
+
+  - name: validation_middleware
+    description: Validate input at route level
+    example: |
+      import { z } from 'zod';
+
+      const createItemSchema = z.object({
+        name: z.string().min(1),
+        price: z.number().positive(),
+      });
+
+      app.post('/items', validate(createItemSchema), async (req, res) => {
+        // req.body is validated
+      });
+
+anti_patterns:
+  - name: callback_hell
+    description: Use async/await instead of nested callbacks
+    bad: "db.find(id, (err, item) => { ... })"
+    good: "const item = await db.find(id)"
+
+  - name: unhandled_promise
+    description: Always handle promise rejections
+    bad: "asyncFunction()"
+    good: "asyncFunction().catch(handleError)"
+
+imports:
+  - "import express from 'express'"
+  - "import { z } from 'zod'"
+  - "import type { Request, Response, NextFunction } from 'express'"
