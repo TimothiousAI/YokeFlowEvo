@@ -637,11 +637,11 @@ class ApiClient {
   }
 
   /**
-   * Rebuild execution plan for a project
+   * Build/rebuild execution plan for a project from pending tasks
    */
   async rebuildExecutionPlan(projectId: string): Promise<any> {
     const response = await this.client.post<any>(
-      `/api/projects/${projectId}/execution-plan/rebuild`
+      `/api/projects/${projectId}/execution-plan/build`
     );
     return response.data;
   }

@@ -807,8 +807,8 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Parallel Execution View - Shows when parallel mode is active or configured */}
-      {(isParallelRunning || executionPlan?.batches?.length > 0) && activePanel === 'session' && (
+      {/* Parallel Execution View - Shows when project is initialized and has tasks remaining */}
+      {is_initialized && !isComplete && activePanel === 'session' && (
         <div className="mb-6">
           <BatchExecutionView
             projectId={projectId}
