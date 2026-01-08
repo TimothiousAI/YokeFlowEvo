@@ -47,6 +47,7 @@ interface Worktree {
 interface KanbanTask extends Task {
   worktree_id?: string;
   kanban_status?: KanbanColumn;
+  status?: 'pending' | 'running' | 'review' | 'error';
 }
 
 interface KanbanBoardProps {
@@ -113,11 +114,11 @@ function TaskCard({
           </span>
         </div>
         <span className={`text-xs px-1.5 py-0.5 rounded ${
-          task.priority === 'high' ? 'bg-red-500/20 text-red-400' :
-          task.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+          task.priority === 1 ? 'bg-red-500/20 text-red-400' :
+          task.priority === 2 ? 'bg-yellow-500/20 text-yellow-400' :
           'bg-gray-500/20 text-gray-400'
         }`}>
-          {task.priority}
+          {task.priority === 1 ? 'high' : task.priority === 2 ? 'medium' : 'low'}
         </span>
       </div>
 
@@ -231,13 +232,9 @@ export function KanbanBoard({
       grouped[column].push(task);
     });
 
-    // Sort each column by priority
-    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    // Sort each column by priority (1=high, 2=medium, 3=low)
     Object.keys(grouped).forEach(key => {
-      grouped[key as KanbanColumn].sort((a, b) =>
-        (priorityOrder[a.priority as keyof typeof priorityOrder] || 2) -
-        (priorityOrder[b.priority as keyof typeof priorityOrder] || 2)
-      );
+      grouped[key as KanbanColumn].sort((a, b) => a.priority - b.priority);
     });
 
     return grouped;

@@ -17,7 +17,12 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import InterventionDashboard from '@/components/InterventionDashboard';
 import { ParallelSwimlane } from '@/components/ParallelSwimlane';
 import { ParallelProgress } from '@/components/ParallelProgress';
+import { ParallelControlPanel } from '@/components/ParallelControlPanel';
+import { ExecutionTimeline } from '@/components/ExecutionTimeline';
+import { WorktreeCard } from '@/components/WorktreeCard';
+import { KanbanBoard } from '@/components/KanbanBoard';
 import { CostDashboard } from '@/components/CostDashboard';
+import { BatchExecutionView } from '@/components/parallel';
 import { useProjectWebSocket } from '@/lib/websocket';
 import { api } from '@/lib/api';
 import { truncate } from '@/lib/utils';
@@ -36,7 +41,7 @@ export default function ProjectDetailPage() {
   const [isInitializing, setIsInitializing] = useState(false);
   const [isStartingCoding, setIsStartingCoding] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [activeTab, setActiveTab] = useState<'current' | 'history' | 'quality' | 'logs' | 'screenshots' | 'interventions' | 'parallel' | 'costs'>('current');
+  const [activeTab, setActiveTab] = useState<'current' | 'history' | 'quality' | 'logs' | 'screenshots' | 'interventions' | 'costs'>('current');
   const [isStopping, setIsStopping] = useState(false);
   const [isStoppingAfterCurrent, setIsStoppingAfterCurrent] = useState(false);
   const [isRefreshingSessions, setIsRefreshingSessions] = useState(false);
@@ -50,7 +55,11 @@ export default function ProjectDetailPage() {
 
   // Parallel execution state
   const [isParallelRunning, setIsParallelRunning] = useState(false);
+  const [isParallelPaused, setIsParallelPaused] = useState(false);
   const [parallelData, setParallelData] = useState<any>(null);
+  const [worktrees, setWorktrees] = useState<any[]>([]);
+  const [executionPlan, setExecutionPlan] = useState<any>(null);
+  // parallelViewMode removed - now using BatchExecutionView component
 
   // Panel State: 'session' or 'project' (shows Session Details by default)
   const [activePanel, setActivePanel] = useState<'session' | 'project'>('session');
@@ -294,7 +303,7 @@ export default function ProjectDetailPage() {
     try {
       await api.startParallelExecution(projectId);
       setIsParallelRunning(true);
-      setActiveTab('parallel');
+      // BatchExecutionView will show automatically when parallel is running
       toast.success('Parallel execution started');
       // Poll for parallel status
       loadParallelStatus();
@@ -322,18 +331,99 @@ export default function ProjectDetailPage() {
       const status = await api.getParallelStatus(projectId);
       setParallelData(status);
       setIsParallelRunning(status.is_running);
+      setIsParallelPaused(status.is_paused || false);
+      if (status.execution_plan) {
+        setExecutionPlan(status.execution_plan);
+      }
     } catch (err) {
       console.error('Failed to load parallel status:', err);
+    }
+  }
+
+  async function loadWorktrees() {
+    try {
+      const data = await api.getWorktrees(projectId);
+      setWorktrees(data || []);
+    } catch (err) {
+      console.error('Failed to load worktrees:', err);
+    }
+  }
+
+  async function handlePauseParallel() {
+    try {
+      await api.pauseParallelExecution(projectId);
+      setIsParallelPaused(true);
+      toast.success('Parallel execution paused');
+    } catch (err: any) {
+      console.error('Failed to pause parallel execution:', err);
+      const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
+      toast.error(`Failed to pause: ${errorMsg}`);
+    }
+  }
+
+  async function handleResumeParallel() {
+    try {
+      await api.resumeParallelExecution(projectId);
+      setIsParallelPaused(false);
+      toast.success('Parallel execution resumed');
+    } catch (err: any) {
+      console.error('Failed to resume parallel execution:', err);
+      const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
+      toast.error(`Failed to resume: ${errorMsg}`);
+    }
+  }
+
+  async function handleMergeWorktree(worktreeId: string) {
+    try {
+      await api.mergeWorktree(worktreeId);
+      toast.success('Worktree merged successfully');
+      loadWorktrees();
+    } catch (err: any) {
+      console.error('Failed to merge worktree:', err);
+      const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
+      toast.error(`Failed to merge: ${errorMsg}`);
+    }
+  }
+
+  async function handleDeleteWorktree(worktreeId: string) {
+    try {
+      await api.deleteWorktree(worktreeId);
+      toast.success('Worktree deleted');
+      loadWorktrees();
+    } catch (err: any) {
+      console.error('Failed to delete worktree:', err);
+      const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
+      toast.error(`Failed to delete worktree: ${errorMsg}`);
+    }
+  }
+
+  async function handleRebuildPlan() {
+    try {
+      // Trigger plan rebuild via API
+      toast.info('Rebuilding execution plan...');
+      await api.startParallelExecution(projectId); // This rebuilds plan if needed
+      loadParallelStatus();
+      toast.success('Execution plan rebuilt');
+    } catch (err: any) {
+      console.error('Failed to rebuild plan:', err);
+      const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
+      toast.error(`Failed to rebuild plan: ${errorMsg}`);
     }
   }
 
   // Poll for parallel status when parallel is running
   useEffect(() => {
     if (isParallelRunning) {
-      const interval = setInterval(loadParallelStatus, 5000);
+      const interval = setInterval(() => {
+        loadParallelStatus();
+        loadWorktrees();
+      }, 5000);
       return () => clearInterval(interval);
     }
   }, [isParallelRunning]);
+
+  // Load parallel data when parallel execution is active
+  // (BatchExecutionView handles its own data loading via useParallelState)
 
   function handleStartRename() {
     setEditedName(project?.name || '');
@@ -717,6 +807,23 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
+      {/* Parallel Execution View - Shows when parallel mode is active or configured */}
+      {(isParallelRunning || executionPlan?.batches?.length > 0) && activePanel === 'session' && (
+        <div className="mb-6">
+          <BatchExecutionView
+            projectId={projectId}
+            onViewExpertise={() => {
+              setDetailsModalTab('expertise');
+              setActivePanel('project');
+            }}
+            onViewSessionDetails={(taskId) => {
+              console.log('View session details for task:', taskId);
+              // Could open a modal or navigate to session details
+            }}
+          />
+        </div>
+      )}
+
       {/* Session Details Panel (shown by default) */}
       {activePanel === 'session' && (
         <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
@@ -785,19 +892,6 @@ export default function ProjectDetailPage() {
               <span className="ml-2 text-sm">[!]</span>
             </button>
             <button
-              onClick={() => setActiveTab('parallel')}
-              className={`flex-1 px-6 py-4 font-medium transition-colors ${
-                activeTab === 'parallel'
-                  ? 'bg-gray-800 text-blue-400 border-b-2 border-blue-500'
-                  : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
-              }`}
-            >
-              Parallel Execution
-              {isParallelRunning && (
-                <span className="ml-2 w-2 h-2 bg-green-400 rounded-full inline-block animate-pulse"></span>
-              )}
-            </button>
-            <button
               onClick={() => setActiveTab('costs')}
               className={`flex-1 px-6 py-4 font-medium transition-colors ${
                 activeTab === 'costs'
@@ -853,77 +947,6 @@ export default function ProjectDetailPage() {
 
             {activeTab === 'interventions' && (
               <InterventionDashboard projectId={projectId} />
-            )}
-
-            {activeTab === 'parallel' && (
-              <div className="space-y-6">
-                {/* Parallel Execution Controls */}
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-100">
-                    Parallel Execution
-                  </h3>
-                  <div className="flex gap-3">
-                    {!isParallelRunning ? (
-                      <button
-                        onClick={handleStartParallel}
-                        disabled={!is_initialized || isComplete}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
-                      >
-                        Start Parallel Execution
-                      </button>
-                    ) : (
-                      <button
-                        onClick={handleCancelParallel}
-                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium"
-                      >
-                        Cancel Parallel Execution
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Parallel Progress Dashboard */}
-                {isParallelRunning && parallelData && (
-                  <ParallelProgress
-                    batchProgress={parallelData.batch_progress || {
-                      current_batch: 1,
-                      total_batches: 1,
-                      current_batch_tasks: 0,
-                      completed_batch_tasks: 0,
-                      total_tasks_remaining: 0,
-                    }}
-                    runningAgents={parallelData.running_agents || []}
-                    totalCostUsd={parallelData.total_cost || 0}
-                    estimatedTimeRemaining={parallelData.estimated_time_remaining}
-                  />
-                )}
-
-                {/* Swimlane Visualization */}
-                {parallelData && parallelData.epics && parallelData.tasks && (
-                  <div>
-                    <h4 className="text-md font-semibold text-gray-100 mb-4">
-                      Task Dependencies & Progress
-                    </h4>
-                    <ParallelSwimlane
-                      epics={parallelData.epics}
-                      tasks={parallelData.tasks}
-                    />
-                  </div>
-                )}
-
-                {/* No parallel execution running */}
-                {!isParallelRunning && (
-                  <div className="bg-gray-900 border border-gray-800 rounded-lg p-8 text-center">
-                    <p className="text-gray-400 mb-4">
-                      Parallel execution allows multiple agents to work on independent tasks simultaneously,
-                      significantly reducing overall project completion time.
-                    </p>
-                    <p className="text-gray-500 text-sm">
-                      Click "Start Parallel Execution" to begin.
-                    </p>
-                  </div>
-                )}
-              </div>
             )}
 
             {activeTab === 'costs' && (

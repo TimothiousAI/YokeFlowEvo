@@ -127,7 +127,7 @@ export function ParallelSwimlane({ epics, tasks, className = '' }: ParallelSwiml
 
   // Generate dependency arrows
   const renderDependencyArrows = () => {
-    const arrows: JSX.Element[] = [];
+    const arrows: React.ReactElement[] = [];
 
     tasks.forEach(task => {
       if (task.depends_on && task.depends_on.length > 0) {

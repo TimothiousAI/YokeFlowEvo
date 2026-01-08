@@ -49,10 +49,11 @@ interface LearningHistoryEntry {
 interface ExpertiseViewerProps {
   domains: ExpertiseDomain[];
   onSave?: (domain: string, content: string) => Promise<void>;
+  onRefresh?: () => Promise<void>;
   className?: string;
 }
 
-export function ExpertiseViewer({ domains, onSave, className = '' }: ExpertiseViewerProps) {
+export function ExpertiseViewer({ domains, onSave, onRefresh, className = '' }: ExpertiseViewerProps) {
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [editingDomain, setEditingDomain] = useState<string | null>(null);
   const [editContent, setEditContent] = useState<string>('');
