@@ -124,13 +124,22 @@ class ExecutionPlanBuilder:
     """
 
     # Patterns for detecting file references in task descriptions
+    # IMPORTANT: These must be specific to avoid false positives from common words
+    # like "Node.js", "React.js", "SQLite", etc.
     FILE_PATTERNS = [
-        r'`([a-zA-Z0-9_/\-\.]+\.[a-zA-Z]+)`',  # `path/to/file.ext`
-        r'"([a-zA-Z0-9_/\-\.]+\.[a-zA-Z]+)"',  # "path/to/file.ext"
-        r"'([a-zA-Z0-9_/\-\.]+\.[a-zA-Z]+)'",  # 'path/to/file.ext'
-        r'\b((?:core|api|web-ui|tests|schema)/[a-zA-Z0-9_/\-\.]+)',  # core/module.py
-        r'\b([a-zA-Z0-9_]+\.(?:py|ts|tsx|js|jsx|sql|md|yaml|json))\b',  # file.py
+        r'`([a-zA-Z0-9_/\-\.]+\.[a-zA-Z]+)`',  # `path/to/file.ext` (backtick-quoted)
+        r'"([a-zA-Z0-9_/\-\.]+/[a-zA-Z0-9_/\-\.]+\.[a-zA-Z]+)"',  # "path/to/file.ext" (must have path separator)
+        r"'([a-zA-Z0-9_/\-\.]+/[a-zA-Z0-9_/\-\.]+\.[a-zA-Z]+)'",  # 'path/to/file.ext' (must have path separator)
+        r'\b((?:src|lib|server|client|routes|components|services|middleware|migrations|utils|hooks|api|core|web-ui|tests|schema)/[a-zA-Z0-9_/\-\.]+\.[a-zA-Z]+)',  # Explicit path prefixes
+        r'\b((?:index|main|app|config|schema|package|tsconfig|vite\.config|setup|init)\.(?:py|ts|tsx|js|jsx|json|yaml|sql))\b',  # Common root files only
     ]
+
+    # Words to exclude from file detection (common false positives)
+    FILE_EXCLUSIONS = {
+        'node.js', 'react.js', 'vue.js', 'next.js', 'express.js', 'sqlite',
+        'postgresql', 'mongodb', 'redis', 'docker', 'kubernetes',
+        'typescript', 'javascript', 'python', 'golang', 'rust',
+    }
 
     # Keywords that suggest file modifications
     MODIFICATION_KEYWORDS = [
@@ -324,6 +333,9 @@ class ExecutionPlanBuilder:
         """
         Extract file path references from text.
 
+        Uses conservative pattern matching to avoid false positives from
+        common technology names (Node.js, React.js, etc.).
+
         Args:
             text: Text to analyze
 
@@ -337,8 +349,27 @@ class ExecutionPlanBuilder:
             for match in matches:
                 # Normalize path
                 file_path = match.strip().lower()
+
                 # Filter out obvious non-files
-                if not file_path.startswith(('http', 'www', 'git')):
+                if file_path.startswith(('http', 'www', 'git')):
+                    continue
+
+                # Filter out common technology names that look like files
+                if file_path in self.FILE_EXCLUSIONS:
+                    continue
+
+                # Only include if it looks like a real file path
+                # (has path separator OR is a known root file pattern)
+                has_path_sep = '/' in file_path
+                is_root_file = file_path in {
+                    'index.js', 'index.ts', 'index.tsx', 'index.py',
+                    'main.js', 'main.ts', 'main.py', 'app.js', 'app.ts',
+                    'app.py', 'app.jsx', 'app.tsx', 'config.js', 'config.ts',
+                    'config.py', 'schema.sql', 'package.json', 'tsconfig.json',
+                    'vite.config.js', 'vite.config.ts', 'setup.py', 'init.sql'
+                }
+
+                if has_path_sep or is_root_file:
                     files.add(file_path)
 
         return files

@@ -1278,6 +1278,39 @@ class TaskDatabase:
             rows = await conn.fetch(query, *params)
             return [dict(row) for row in rows]
 
+    async def get_recently_completed_tasks(
+        self,
+        project_id: UUID,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recently completed tasks for a project.
+
+        Used by the expertise learning system to identify what tasks
+        were completed during the current session.
+
+        Args:
+            project_id: Project UUID
+            limit: Maximum number of tasks to return
+
+        Returns:
+            List of recently completed task records, ordered by completion time (most recent first)
+        """
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT t.*, e.name as epic_name
+                FROM tasks t
+                JOIN epics e ON t.epic_id = e.id
+                WHERE t.project_id = $1
+                  AND t.done = true
+                ORDER BY t.updated_at DESC NULLS LAST, t.id DESC
+                LIMIT $2
+                """,
+                project_id, limit
+            )
+            return [dict(row) for row in rows]
+
     # =========================================================================
     # Test Operations
     # =========================================================================

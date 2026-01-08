@@ -466,6 +466,78 @@ class SessionLogger:
         # (sessions table with metrics JSONB field)
         return session_summary
 
+    def get_all_logs(self) -> str:
+        """
+        Get all session logs as a single string for expertise extraction.
+
+        Reads the TXT log file and returns its contents. This is used by the
+        expertise learning system to extract patterns from completed sessions.
+
+        Returns:
+            String containing all session logs, or empty string if unavailable
+        """
+        try:
+            if self.txt_file.exists():
+                with open(self.txt_file, "r", encoding='utf-8') as f:
+                    return f.read()
+        except Exception as e:
+            # Log error but don't fail
+            pass
+        return ""
+
+    def get_structured_logs(self) -> list:
+        """
+        Get all session logs as structured JSONL entries.
+
+        Reads the JSONL log file and returns parsed entries. This provides
+        more detailed information for expertise extraction.
+
+        Returns:
+            List of log entry dictionaries, or empty list if unavailable
+        """
+        entries = []
+        try:
+            if self.jsonl_file.exists():
+                with open(self.jsonl_file, "r", encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                entries.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                continue
+        except Exception as e:
+            # Log error but don't fail
+            pass
+        return entries
+
+    def get_tool_summary(self) -> dict:
+        """
+        Get a summary of tool usage from the session.
+
+        Returns:
+            Dictionary with tool names as keys and usage counts/details as values
+        """
+        tool_summary = {}
+        entries = self.get_structured_logs()
+
+        for entry in entries:
+            if entry.get("event") == "tool_use":
+                tool_name = entry.get("tool_name", "unknown")
+                if tool_name not in tool_summary:
+                    tool_summary[tool_name] = {"count": 0, "errors": 0}
+                tool_summary[tool_name]["count"] += 1
+            elif entry.get("event") == "tool_result":
+                if entry.get("is_error"):
+                    # Find the tool name from tool_map if available
+                    tool_id = entry.get("tool_id")
+                    if tool_id in self.tool_map:
+                        tool_name = self.tool_map[tool_id][0]
+                        if tool_name in tool_summary:
+                            tool_summary[tool_name]["errors"] += 1
+
+        return tool_summary
+
 
 class QuietOutputFilter:
     """

@@ -1191,8 +1191,12 @@ class AgentOrchestrator:
                     # Bootstrap project with Claude SDK structure
                     await self._bootstrap_project_structure(project_id, project_path, db, session_logger)
 
-                # Export updated expertise to files after successful sessions
+                # Learn from session and export expertise after successful sessions
                 if status != "error":
+                    # First, learn from this session (extract patterns, techniques, learnings)
+                    await self._learn_from_session(project_id, session_id, db, session_logger)
+
+                    # Then export updated expertise to files
                     await self._export_expertise_to_files(project_id, project_path, db, session_logger)
 
                 # Clear logger from session manager
@@ -1465,6 +1469,89 @@ class AgentOrchestrator:
         except Exception as e:
             logger.debug(f"Bootstrap skipped: {e}")
             # Don't fail session for bootstrap errors
+
+    async def _learn_from_session(
+        self,
+        project_id: UUID,
+        session_id: UUID,
+        db: "TaskDatabase",
+        session_logger: Optional[Any] = None
+    ) -> None:
+        """
+        Extract learnings from a completed session and store in expertise database.
+
+        This is the key hook that enables self-learning domain experts. It extracts
+        patterns, techniques, and learnings from session logs and stores them
+        for future sessions to reference.
+
+        Args:
+            project_id: The project UUID
+            session_id: The completed session UUID
+            db: Database connection
+            session_logger: Session logger with accumulated logs
+        """
+        try:
+            from core.learning.expertise_manager import ExpertiseManager
+
+            # Get the most recently completed task for this session
+            # We look at what task was being worked on during this session
+            session_info = await db.get_session(session_id)
+            if not session_info:
+                logger.debug("No session info found for expertise learning")
+                return
+
+            # Get the task that was worked on (using v_next_task progress)
+            # For coding sessions, we get the task that was in progress
+            progress = await db.get_progress(project_id)
+            if not progress:
+                logger.debug("No progress data for expertise learning")
+                return
+
+            # Try to get the last completed task from this session
+            # We look for tasks that were marked complete during this session's timeframe
+            completed_tasks = await db.get_recently_completed_tasks(project_id, limit=1)
+            if not completed_tasks:
+                logger.debug("No completed tasks for expertise learning")
+                return
+
+            task = completed_tasks[0]
+
+            # Get session logs
+            logs = ""
+            if session_logger:
+                logs = session_logger.get_all_logs()
+
+            if not logs:
+                logger.debug("No session logs available for expertise learning")
+                return
+
+            # Initialize expertise manager and learn from this session
+            expertise_mgr = ExpertiseManager(project_id, db)
+            await expertise_mgr.learn_from_session(
+                session_id=session_id,
+                task=task,
+                logs=logs
+            )
+
+            logger.info(f"Learned from session {session_id} (task: {task.get('name', 'unknown')})")
+
+            if session_logger:
+                session_logger.log_event("expertise_learned", {
+                    "task_id": str(task.get("id")),
+                    "task_name": task.get("name", "unknown"),
+                    "domain": expertise_mgr.classify_domain(
+                        task.get("description", "") + " " + task.get("action", ""),
+                        []
+                    )
+                })
+
+        except Exception as e:
+            logger.warning(f"Failed to learn from session: {e}")
+            # Don't fail session for learning errors
+            if session_logger:
+                session_logger.log_event("expertise_learning_error", {
+                    "error": str(e)
+                })
 
     async def _export_expertise_to_files(
         self,

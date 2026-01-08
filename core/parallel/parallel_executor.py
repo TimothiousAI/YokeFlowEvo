@@ -40,12 +40,14 @@ class ExecutionResult:
         duration: Execution time in seconds
         error: Error message if failed
         cost: Execution cost in USD
+        logs: Session logs for expertise learning
     """
     task_id: int
     success: bool
     duration: float
     error: Optional[str] = None
     cost: float = 0.0
+    logs: str = ""
 
 
 @dataclass
@@ -512,14 +514,13 @@ class ParallelExecutor:
 
             # Call ExpertiseManager.learn_from_session()
             # This will extract learnings from the session logs
-            if self.db and session_id and execution_result.success:
-                # Get session logs (would need to implement log capture)
-                logs = ""  # Placeholder - will capture actual logs in Task 890
+            if self.db and session_id and execution_result.success and execution_result.logs:
                 await self.expertise_manager.learn_from_session(
                     session_id=session_id,
                     task=task,
-                    logs=logs
+                    logs=execution_result.logs
                 )
+                logger.info(f"Learned expertise from task {task_id} session")
 
             # Emit task_complete event
             duration = time.time() - start_time
@@ -840,12 +841,18 @@ Focus on quality over speed. Take time to test thoroughly and write clean, maint
                 if not success:
                     logger.warning(f"Task {task_id} agent session unsuccessful: {status}")
 
+                # Capture logs for expertise learning
+                logs = ""
+                if session_logger:
+                    logs = session_logger.get_all_logs()
+
                 return ExecutionResult(
                     task_id=task_id,
                     success=success,
                     duration=duration,
                     cost=cost,
-                    error=error_msg
+                    error=error_msg,
+                    logs=logs
                 )
 
             except asyncio.TimeoutError:
