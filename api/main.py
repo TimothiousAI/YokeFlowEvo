@@ -2205,49 +2205,6 @@ async def start_parallel_execution(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/projects/{project_id}/parallel/status")
-async def get_parallel_status(project_id: str):
-    """
-    Get current status of parallel execution.
-
-    Returns information about running agents, current batch, and progress.
-
-    Args:
-        project_id: UUID of the project
-
-    Returns:
-        Dict with execution status details
-
-    Raises:
-        404: Project not found or no parallel execution running
-    """
-    try:
-        # Check if parallel execution is running
-        task_key = f"{project_id}_parallel"
-        if task_key not in running_sessions:
-            raise HTTPException(
-                status_code=404,
-                detail="No parallel execution running for this project"
-            )
-
-        # Note: Status tracking would require storing executor instance
-        # For now, return basic task status
-        task = running_sessions[task_key]
-
-        return {
-            "status": "running" if not task.done() else "completed",
-            "project_id": project_id,
-            "task_done": task.done(),
-            "message": "Parallel execution in progress"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get parallel status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/api/projects/{project_id}/parallel/cancel")
 async def cancel_parallel_execution(project_id: str):
     """
