@@ -1,0 +1,117 @@
+# Database Domain Expertise
+# YokeFlow PostgreSQL + asyncpg Patterns
+
+domain: database
+description: PostgreSQL, asyncpg, connection pooling, migrations, JSONB
+confidence: 0.7
+usage_count: 0
+last_updated: 2025-01-06
+
+# Core technologies
+stack:
+  database: PostgreSQL 15+
+  driver: asyncpg
+  pooling: asyncpg.Pool
+  schema: schema/postgresql/schema.sql
+  json_support: JSONB
+
+# Key files
+files:
+  abstraction: core/database.py
+  connection: core/database_connection.py
+  schema: schema/postgresql/schema.sql
+  views: schema/postgresql/views.sql
+
+# Patterns learned
+patterns:
+  - name: connection_pool
+    description: Always use connection pool, never create connections directly
+    example: |
+      async with self.pool.acquire() as conn:
+          result = await conn.fetch(query, *params)
+
+  - name: transaction_context
+    description: Use transaction context manager for multi-statement operations
+    example: |
+      async with self.transaction() as conn:
+          await conn.execute(insert1)
+          await conn.execute(insert2)
+
+  - name: parameterized_query
+    description: Always use $1, $2 placeholders, never string formatting
+    example: |
+      await conn.fetchrow(
+          "SELECT * FROM tasks WHERE id = $1 AND project_id = $2",
+          task_id, project_id
+      )
+
+  - name: jsonb_operations
+    description: Use JSONB for flexible metadata storage
+    example: |
+      # Insert with JSONB
+      await conn.execute(
+          "UPDATE tasks SET metadata = $1::jsonb WHERE id = $2",
+          json.dumps(metadata), task_id
+      )
+      # Query JSONB
+      "SELECT * FROM tasks WHERE metadata->>'status' = 'active'"
+
+  - name: jsonb_set_nested
+    description: Use jsonb_set for updating nested JSONB fields without overwriting
+    example: |
+      # Update nested field in metadata
+      await conn.execute(
+          """
+          UPDATE projects
+          SET metadata = jsonb_set(
+              COALESCE(metadata, '{}'),
+              '{execution_plan}',
+              $1::jsonb
+          )
+          WHERE id = $2
+          """,
+          json.dumps(plan_data), project_id
+      )
+
+  - name: jsonb_extract_nested
+    description: Extract deeply nested JSONB values
+    example: |
+      # Get execution plan from metadata
+      row = await conn.fetchrow(
+          "SELECT metadata->'execution_plan' as plan FROM projects WHERE id = $1",
+          project_id
+      )
+
+  - name: returning_clause
+    description: Use RETURNING to get inserted/updated rows
+    example: |
+      row = await conn.fetchrow(
+          "INSERT INTO epics (name) VALUES ($1) RETURNING *",
+          name
+      )
+
+  - name: uuid_handling
+    description: Use UUID type for IDs, asyncpg handles conversion
+    example: |
+      from uuid import UUID
+      project_id = UUID("abb4601b-bb99-43ff-b9a6-d95b2e371d0a")
+      await conn.fetch("SELECT * FROM projects WHERE id = $1", project_id)
+
+# Anti-patterns to avoid
+anti_patterns:
+  - name: string_interpolation
+    description: Never interpolate values into SQL strings
+    bad: f"SELECT * FROM tasks WHERE id = '{task_id}'"
+    good: "SELECT * FROM tasks WHERE id = $1", task_id
+
+  - name: connection_leak
+    description: Always use context managers for connections
+    bad: "conn = await pool.acquire(); await conn.fetch(...)"
+    good: "async with pool.acquire() as conn: await conn.fetch(...)"
+
+# Common imports
+imports:
+  - import asyncpg
+  - from uuid import UUID, uuid4
+  - import json
+  - from contextlib import asynccontextmanager

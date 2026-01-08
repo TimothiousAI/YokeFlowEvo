@@ -1,0 +1,87 @@
+# MCP Domain Expertise
+# Model Context Protocol Server + Tools Patterns
+
+domain: mcp
+description: MCP server implementation, tool definitions, TypeScript, JSON-RPC
+confidence: 0.7
+usage_count: 0
+last_updated: 2025-01-06
+
+# Core technologies
+stack:
+  protocol: Model Context Protocol
+  language: TypeScript
+  runtime: Node.js
+  transport: stdio
+  schema: JSON Schema
+
+# Key files
+files:
+  server: mcp-task-manager/src/index.ts
+  build: mcp-task-manager/dist/index.js
+  config: mcp-task-manager/package.json
+  types: mcp-task-manager/src/types.ts
+
+# Patterns learned
+patterns:
+  - name: tool_definition
+    description: Define MCP tools with JSON Schema input
+    example: |
+      server.tool("task_status", {
+        description: "Get task status by ID",
+        inputSchema: {
+          type: "object",
+          properties: {
+            task_id: { type: "string", description: "Task UUID" }
+          },
+          required: ["task_id"]
+        }
+      }, async (params) => {
+        const task = await db.getTask(params.task_id);
+        return { content: [{ type: "text", text: JSON.stringify(task) }] };
+      });
+
+  - name: resource_definition
+    description: Define MCP resources for data access
+    example: |
+      server.resource("project/{id}", {
+        description: "Project details",
+        mimeType: "application/json"
+      }, async (uri) => {
+        const id = uri.pathname.split("/")[1];
+        return { content: JSON.stringify(await db.getProject(id)) };
+      });
+
+  - name: error_handling
+    description: Return structured errors from tools
+    example: |
+      if (!task) {
+        return {
+          content: [{ type: "text", text: "Task not found" }],
+          isError: true
+        };
+      }
+
+  - name: database_connection
+    description: Pool database connections in MCP server
+    example: |
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      // Use pool in tool handlers
+
+# Anti-patterns to avoid
+anti_patterns:
+  - name: sync_operations
+    description: MCP tools should be async
+    bad: "const result = db.query(...)"
+    good: "const result = await pool.query(...)"
+
+  - name: large_responses
+    description: Don't return huge datasets
+    bad: "Return all 1000 tasks"
+    good: "Return paginated results or summary"
+
+# Common imports
+imports:
+  - import { Server } from "@modelcontextprotocol/sdk/server/index.js"
+  - import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
+  - import { Pool } from "pg"

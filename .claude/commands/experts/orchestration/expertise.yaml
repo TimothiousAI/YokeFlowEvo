@@ -1,0 +1,271 @@
+# Orchestration Domain Expertise
+# YokeFlow Agent Management + Session Lifecycle Patterns
+
+domain: orchestration
+description: Agent lifecycle, session management, parallel execution, worktrees, batch processing, expertise sync, project bootstrapping
+confidence: 0.8
+usage_count: 4
+version: 3
+last_updated: 2025-01-07
+
+# Core technologies
+stack:
+  agent_sdk: Claude Agent SDK
+  subprocess: asyncio.create_subprocess_exec
+  git: git worktree (for parallel)
+  signals: SIGINT, SIGTERM handling
+
+# Key files
+files:
+  orchestrator: core/orchestrator.py
+  agent: core/agent.py
+  parallel: core/parallel/
+  sandbox: core/sandbox_manager.py
+  progress: core/progress.py
+  expertise_exporter: core/learning/expertise_exporter.py
+  skill_generator: core/learning/skill_generator.py
+  expertise_sync: core/learning/expertise_sync.py
+  expertise_manager: core/learning/expertise_manager.py
+  project_bootstrapper: core/bootstrap/project_bootstrapper.py
+  domain_detector: core/bootstrap/domain_detector.py
+  claude_md_generator: core/bootstrap/claude_md_generator.py
+  templates: templates/claude-sdk-project/
+
+# Patterns learned
+patterns:
+  - name: session_lifecycle
+    description: Session follows init -> running -> completed/failed
+    example: |
+      async def run_session(self):
+          session = await self.db.create_session(project_id, "coding")
+          try:
+              result = await self.agent.run()
+              await self.db.update_session(session_id, status="completed")
+          except Exception as e:
+              await self.db.update_session(session_id, status="failed")
+
+  - name: graceful_shutdown
+    description: Handle interrupts to save state before exit
+    example: |
+      def setup_handlers(self):
+          signal.signal(signal.SIGINT, self._handle_interrupt)
+          if hasattr(signal, 'SIGTERM'):
+              signal.signal(signal.SIGTERM, self._handle_interrupt)
+
+  - name: worktree_isolation
+    description: Each parallel agent works in isolated git worktree
+    example: |
+      # Create worktree for epic
+      git worktree add .worktrees/epic-1 -b epic-1-work
+      # Agent works in .worktrees/epic-1/
+      # Merge back when done
+      git merge epic-1-work
+
+  - name: batch_execution
+    description: Process tasks in dependency-ordered batches
+    example: |
+      for batch in execution_plan.batches:
+          if batch.can_parallel:
+              await asyncio.gather(*[run_task(t) for t in batch.tasks])
+          else:
+              for task in batch.tasks:
+                  await run_task(task)
+
+  - name: agent_spawn
+    description: Spawn Claude agent as subprocess with MCP tools
+    example: |
+      process = await asyncio.create_subprocess_exec(
+          "claude", "--mcp-config", mcp_config_path,
+          "--prompt", prompt,
+          cwd=working_dir,
+          stdout=asyncio.subprocess.PIPE
+      )
+
+  - name: post_session_hooks
+    description: Run additional logic after specific session types complete
+    example: |
+      # In run_session(), after session completes successfully
+      if is_initializer and status != "error":
+          await self.quality.run_test_coverage_analysis(project_id, db)
+          # Build execution plan for parallel execution
+          await self._build_execution_plan(project_id, db, session_logger)
+
+  - name: non_blocking_hooks
+    description: Post-session hooks should not fail the session
+    example: |
+      async def _build_execution_plan(self, project_id, db, logger):
+          try:
+              builder = ExecutionPlanBuilder(db)
+              plan = await builder.build_plan(project_id)
+              await db.save_execution_plan(project_id, plan.to_dict())
+          except Exception as e:
+              logger.error(f"Plan building failed: {e}")
+              # Don't re-raise - session already succeeded
+
+  - name: batch_executor_pattern
+    description: Coordinate parallel execution with BatchExecutor
+    example: |
+      from core.parallel.batch_executor import BatchExecutor
+      executor = BatchExecutor(
+          project_id=project_id,
+          project_path=project['local_path'],
+          db=db,
+          max_concurrency=3,
+          progress_callback=callback
+      )
+      result = await executor.execute_plan(plan)
+
+  - name: mode_selection
+    description: Determine parallel vs sequential execution based on plan
+    example: |
+      def _should_use_parallel(self, plan: Dict) -> bool:
+          batches = plan.get('batches', [])
+          parallel_batches = [
+              b for b in batches
+              if b.get('can_parallel') and len(b.get('task_ids', [])) > 1
+          ]
+          return len(parallel_batches) > 0
+
+  - name: merge_validation
+    description: Validate merges after parallel batch execution
+    example: |
+      from core.parallel.merge_validator import MergeValidator
+      validator = MergeValidator(project_path, db)
+      result = await validator.validate_batch(batch_id)
+      if result.status == "conflicts":
+          # Handle conflicts
+          pass
+
+  - name: expertise_export_hook
+    description: Export expertise to files after successful sessions
+    example: |
+      # In run_session(), after session completes
+      if status != "error":
+          await self._export_expertise_to_files(
+              project_id, project_path, db, session_logger
+          )
+
+      async def _export_expertise_to_files(self, project_id, path, db, logger):
+          try:
+              from core.learning.expertise_sync import ExpertiseSyncService
+              sync_service = ExpertiseSyncService(path, project_id, db)
+              result = await sync_service.export_to_files(generate_skills=True)
+              logger.info(f"Exported {len(result.domains_synced)} domains")
+          except Exception as e:
+              logger.debug(f"Export skipped: {e}")
+
+  - name: expertise_sync
+    description: Bidirectional sync between file and DB expertise
+    example: |
+      from core.learning.expertise_sync import ExpertiseSyncService
+
+      sync_service = ExpertiseSyncService(
+          project_path=project_path,
+          project_id=project_id,
+          db=db
+      )
+
+      # Import from files on project load
+      result = await sync_service.import_from_files()
+
+      # Export to files after learning
+      result = await sync_service.export_to_files(generate_skills=True)
+
+      # Full bidirectional sync
+      result = await sync_service.sync()
+
+  - name: skill_generation
+    description: Generate native Claude skills from mature expertise
+    example: |
+      from core.learning.skill_generator import SkillGenerator
+
+      generator = SkillGenerator(project_path)
+
+      # Check maturity (confidence >= 0.8, usage >= 10)
+      if generator.should_generate(expertise):
+          result = await generator.generate_skill(domain, expertise)
+          # Creates .claude/skills/{domain}-expert/SKILL.md
+
+  - name: routing_priority
+    description: Route to expertise source by priority (skills -> files -> DB)
+    example: |
+      # In ExpertiseManager.route_to_expert()
+      # 1. Check for native skills first
+      skill_content = self._find_native_skill(domain, project_path)
+      if skill_content:
+          return skill_content
+
+      # 2. Check file-based expertise
+      file_expertise = await self.get_expertise_from_files(domain, project_path)
+      if file_expertise:
+          return file_expertise
+
+      # 3. Fall back to database
+      db_expertise = await self.get_expertise(domain)
+      return db_expertise
+
+  - name: project_bootstrap
+    description: Bootstrap new projects with Claude SDK structure
+    example: |
+      from core.bootstrap.project_bootstrapper import ProjectBootstrapper
+
+      bootstrapper = ProjectBootstrapper()
+      result = await bootstrapper.bootstrap(
+          project_path=project_path,
+          app_spec=app_spec,
+          project_name=project['name']
+      )
+      # Creates .claude/, CLAUDE.md, and domain stubs
+
+  - name: domain_detection
+    description: Detect domains from app specification
+    example: |
+      from core.bootstrap.domain_detector import DomainDetector
+
+      detector = DomainDetector()
+      domains = detector.detect_domains(app_spec)
+      # Returns list of DetectedDomain with confidence scores
+
+      stack = detector.get_all_detected_stack(app_spec)
+      # Returns dict of detected technologies
+
+  - name: claude_md_generation
+    description: Generate CLAUDE.md from app specification
+    example: |
+      from core.bootstrap.claude_md_generator import CLAUDEMDGenerator
+
+      generator = CLAUDEMDGenerator()
+      result = await generator.generate(
+          app_spec=app_spec,
+          project_name=project_name,
+          detected_domains=domains
+      )
+      # Returns GeneratedCLAUDEMD with content and metadata
+
+  - name: session0_bootstrap_hook
+    description: Bootstrap project structure after Session 0
+    example: |
+      # In orchestrator.run_session(), after initializer completes
+      if is_initializer and status != "error":
+          await self._bootstrap_project_structure(
+              project_id, project_path, db, session_logger
+          )
+
+# Anti-patterns to avoid
+anti_patterns:
+  - name: blocking_in_async
+    description: Never use subprocess.run in async context
+    bad: subprocess.run(["claude", ...])
+    good: await asyncio.create_subprocess_exec("claude", ...)
+
+  - name: missing_cleanup
+    description: Always cleanup worktrees and resources
+    bad: "Leave worktrees after parallel execution"
+    good: "git worktree remove .worktrees/epic-1 after merge"
+
+# Common imports
+imports:
+  - import asyncio
+  - import signal
+  - from pathlib import Path
+  - import subprocess

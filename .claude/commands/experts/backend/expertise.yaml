@@ -1,0 +1,105 @@
+# Backend Domain Expertise
+# YokeFlow FastAPI + Python Backend Patterns
+
+domain: backend
+description: FastAPI REST API, async Python, Pydantic models, WebSocket handling
+confidence: 0.7
+usage_count: 0
+last_updated: 2025-01-06
+
+# Core technologies
+stack:
+  framework: FastAPI
+  language: Python 3.11+
+  async_library: asyncio
+  validation: Pydantic v2
+  server: Uvicorn
+
+# Key files
+files:
+  main_api: api/main.py
+  database: core/database.py
+  orchestrator: core/orchestrator.py
+  agent: core/agent.py
+  config: core/config.py
+
+# Patterns learned
+patterns:
+  - name: async_endpoint
+    description: All API endpoints must be async def
+    example: |
+      @app.get("/api/resource")
+      async def get_resource():
+          async with db.acquire() as conn:
+              return await conn.fetch("SELECT * FROM table")
+
+  - name: pydantic_response
+    description: Use response_model for type safety
+    example: |
+      @app.get("/api/items", response_model=List[ItemResponse])
+      async def list_items():
+          ...
+
+  - name: websocket_broadcast
+    description: WebSocket manager pattern for real-time updates
+    example: |
+      await manager.broadcast(project_id, {"type": "status", "data": payload})
+
+  - name: error_handling
+    description: Use HTTPException for API errors
+    example: |
+      if not project:
+          raise HTTPException(status_code=404, detail="Project not found")
+
+  - name: background_tasks
+    description: Use BackgroundTasks for non-blocking operations
+    example: |
+      @app.post("/api/start")
+      async def start(background_tasks: BackgroundTasks):
+          background_tasks.add_task(long_running_operation)
+          return {"status": "started"}
+
+  - name: dataclass_serialization
+    description: Use dataclasses with to_dict() for JSON-serializable data structures
+    example: |
+      @dataclass
+      class ExecutionPlan:
+          project_id: UUID
+          batches: List[ExecutionBatch]
+          metadata: Dict[str, Any]
+
+          def to_dict(self) -> Dict[str, Any]:
+              return {
+                  "project_id": str(self.project_id),
+                  "batches": [b.to_dict() for b in self.batches],
+                  "metadata": self.metadata
+              }
+
+  - name: api_with_optional_params
+    description: Use Optional with None default for optional query params
+    example: |
+      @app.get("/api/resource")
+      async def get_resource(
+          include_details: bool = False,
+          limit: Optional[int] = None
+      ):
+          ...
+
+# Anti-patterns to avoid
+anti_patterns:
+  - name: sync_in_async
+    description: Never use blocking calls in async functions
+    bad: requests.get(url)
+    good: async with httpx.AsyncClient() as client: await client.get(url)
+
+  - name: missing_await
+    description: Always await coroutines
+    bad: db.fetch_one(query)
+    good: await db.fetch_one(query)
+
+# Common imports
+imports:
+  - from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket
+  - from pydantic import BaseModel, Field
+  - from typing import List, Optional, Dict, Any
+  - import asyncio

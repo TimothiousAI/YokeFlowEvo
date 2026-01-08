@@ -1,0 +1,94 @@
+# Testing Domain Expertise
+# YokeFlow pytest + Async Testing Patterns
+
+domain: testing
+description: pytest, async tests, fixtures, mocking, integration tests
+confidence: 0.7
+usage_count: 0
+last_updated: 2025-01-06
+
+# Core technologies
+stack:
+  framework: pytest
+  async: pytest-asyncio
+  mocking: unittest.mock, pytest-mock
+  coverage: pytest-cov
+
+# Key files
+files:
+  tests_dir: tests/
+  security_tests: tests/test_security.py
+  database_tests: tests/test_database_abstraction.py
+  orchestrator_tests: tests/test_orchestrator.py
+  config: pytest.ini
+
+# Patterns learned
+patterns:
+  - name: async_test
+    description: Use pytest.mark.asyncio for async tests
+    example: |
+      import pytest
+
+      @pytest.mark.asyncio
+      async def test_database_operation():
+          db = TaskDatabase(connection_url)
+          await db.connect()
+          result = await db.get_project(project_id)
+          assert result is not None
+          await db.disconnect()
+
+  - name: fixture_pattern
+    description: Use fixtures for setup/teardown
+    example: |
+      @pytest.fixture
+      async def db():
+          database = TaskDatabase(TEST_DB_URL)
+          await database.connect()
+          yield database
+          await database.disconnect()
+
+      @pytest.mark.asyncio
+      async def test_with_db(db):
+          result = await db.list_projects()
+
+  - name: mock_external
+    description: Mock external services in tests
+    example: |
+      from unittest.mock import AsyncMock, patch
+
+      @pytest.mark.asyncio
+      async def test_agent_spawn():
+          with patch('asyncio.create_subprocess_exec') as mock:
+              mock.return_value = AsyncMock()
+              mock.return_value.wait = AsyncMock(return_value=0)
+              result = await spawn_agent()
+              assert result.success
+
+  - name: parametrize
+    description: Use parametrize for multiple test cases
+    example: |
+      @pytest.mark.parametrize("status,expected", [
+          ("pending", True),
+          ("completed", False),
+          ("failed", False),
+      ])
+      def test_is_pending(status, expected):
+          assert is_pending(status) == expected
+
+# Anti-patterns to avoid
+anti_patterns:
+  - name: missing_async_mark
+    description: Async tests need the marker
+    bad: "async def test_something():"
+    good: "@pytest.mark.asyncio\nasync def test_something():"
+
+  - name: test_pollution
+    description: Tests should be independent
+    bad: "Rely on state from previous test"
+    good: "Each test sets up its own state"
+
+# Common imports
+imports:
+  - import pytest
+  - from unittest.mock import Mock, AsyncMock, patch
+  - import asyncio

@@ -1369,3 +1369,219 @@ class ExpertiseManager:
         except Exception as e:
             logger.error(f"Failed to format expertise for domain '{domain}': {e}")
             return ""
+
+    # =========================================================================
+    # File-Based Expertise Routing (ADWS Pattern)
+    # =========================================================================
+
+    async def route_to_expert(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        project_path: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Route a query to the appropriate domain expert.
+
+        Priority:
+        1. Check .claude/skills/ for native skills
+        2. Check .claude/commands/experts/ for file expertise
+        3. Fall back to DB-stored expertise
+
+        Args:
+            query: The query or task description
+            context: Context dict with file paths, task info, etc.
+            project_path: Path to project root (for file-based lookup)
+
+        Returns:
+            Formatted expertise string or None if no match
+        """
+        # Classify the domain from query
+        domain = self.classify_domain_from_task(query, context.get('files', []))
+
+        if not domain or domain == 'general':
+            return None
+
+        # Priority 1: Check for native skill
+        if project_path:
+            skill_content = self._find_native_skill(domain, project_path)
+            if skill_content:
+                logger.info(f"Routed to native skill for domain '{domain}'")
+                return skill_content
+
+        # Priority 2: Check file-based expertise
+        if project_path:
+            file_expertise = await self.get_expertise_from_files(domain, project_path)
+            if file_expertise:
+                logger.info(f"Routed to file expertise for domain '{domain}'")
+                return file_expertise
+
+        # Priority 3: Fall back to DB expertise
+        formatted = await self.format_for_prompt(domain)
+        if formatted:
+            logger.info(f"Routed to DB expertise for domain '{domain}'")
+            return formatted
+
+        return None
+
+    async def get_expertise_from_files(
+        self,
+        domain: str,
+        project_path: str
+    ) -> Optional[str]:
+        """
+        Load expertise from file system.
+
+        Args:
+            domain: Domain name
+            project_path: Path to project root
+
+        Returns:
+            Formatted expertise string or None
+        """
+        from pathlib import Path
+
+        try:
+            experts_dir = Path(project_path) / ".claude" / "commands" / "experts" / domain
+            yaml_path = experts_dir / "expertise.yaml"
+
+            if not yaml_path.exists():
+                return None
+
+            content = yaml_path.read_text(encoding='utf-8')
+
+            # Format the file content as expertise
+            lines = [
+                f"# {domain.title()} Domain Expertise",
+                "",
+                f"*Loaded from project expertise files*",
+                "",
+                "---",
+                "",
+                content
+            ]
+
+            return '\n'.join(lines)
+
+        except Exception as e:
+            logger.error(f"Failed to load file expertise for '{domain}': {e}")
+            return None
+
+    def _find_native_skill(
+        self,
+        domain: str,
+        project_path: str
+    ) -> Optional[str]:
+        """
+        Check if a native skill exists for this domain.
+
+        Args:
+            domain: Domain name
+            project_path: Path to project root
+
+        Returns:
+            Skill content or None
+        """
+        from pathlib import Path
+
+        try:
+            skill_path = Path(project_path) / ".claude" / "skills" / f"{domain}-expert" / "SKILL.md"
+
+            if skill_path.exists():
+                return skill_path.read_text(encoding='utf-8')
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"No native skill found for '{domain}': {e}")
+            return None
+
+    def classify_domain_from_task(
+        self,
+        task_description: str,
+        file_paths: List[str] = None
+    ) -> str:
+        """
+        Classify which domain a task belongs to.
+
+        Uses keyword matching and file patterns to determine
+        the most appropriate domain.
+
+        Args:
+            task_description: Description of the task
+            file_paths: List of file paths involved
+
+        Returns:
+            Domain name (or 'general' if no match)
+        """
+        task_lower = task_description.lower()
+        file_paths = file_paths or []
+
+        domain_scores = {domain: 0 for domain in DOMAINS}
+
+        # Score based on keywords in task description
+        for domain, keywords in DOMAIN_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword in task_lower:
+                    domain_scores[domain] += 1
+
+        # Score based on file patterns
+        for file_path in file_paths:
+            file_lower = file_path.lower()
+            for domain, patterns in DOMAIN_FILE_PATTERNS.items():
+                for pattern in patterns:
+                    if pattern in file_lower:
+                        domain_scores[domain] += 2  # File patterns are stronger signals
+
+        # Find highest scoring domain
+        best_domain = max(domain_scores, key=domain_scores.get)
+        best_score = domain_scores[best_domain]
+
+        if best_score > 0:
+            logger.debug(f"Classified task as '{best_domain}' (score: {best_score})")
+            return best_domain
+
+        return 'general'
+
+    async def save_expertise(
+        self,
+        domain: str,
+        content: Dict[str, Any]
+    ) -> bool:
+        """
+        Save expertise to database.
+
+        Args:
+            domain: Domain name
+            content: Expertise content dict
+
+        Returns:
+            True if saved successfully
+        """
+        try:
+            # Check if expertise exists
+            existing = await self.get_expertise(domain)
+
+            if existing:
+                # Update existing
+                version = existing.version + 1
+                await self.db.update_expertise(
+                    self.project_id,
+                    domain,
+                    content,
+                    version
+                )
+            else:
+                # Create new
+                await self.db.create_expertise(
+                    self.project_id,
+                    domain,
+                    content
+                )
+
+            logger.info(f"Saved expertise for domain '{domain}'")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save expertise for '{domain}': {e}")
+            return False
