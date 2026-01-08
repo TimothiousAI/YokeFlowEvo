@@ -591,6 +591,117 @@ class ApiClient {
     );
     return response.data;
   }
+
+  // ============================================================================
+  // Parallel Execution Control (Phase 5)
+  // ============================================================================
+
+  /**
+   * Pause parallel execution
+   */
+  async pauseParallelExecution(projectId: string): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/projects/${projectId}/parallel/pause`
+    );
+    return response.data;
+  }
+
+  /**
+   * Resume parallel execution
+   */
+  async resumeParallelExecution(projectId: string): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/projects/${projectId}/parallel/resume`
+    );
+    return response.data;
+  }
+
+  /**
+   * Stop parallel execution
+   */
+  async stopParallelExecution(projectId: string): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/projects/${projectId}/parallel/stop`
+    );
+    return response.data;
+  }
+
+  /**
+   * Get execution plan for a project
+   */
+  async getExecutionPlan(projectId: string): Promise<any> {
+    const response = await this.client.get<any>(
+      `/api/projects/${projectId}/execution-plan`
+    );
+    return response.data;
+  }
+
+  /**
+   * Rebuild execution plan for a project
+   */
+  async rebuildExecutionPlan(projectId: string): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/projects/${projectId}/execution-plan/rebuild`
+    );
+    return response.data;
+  }
+
+  // ============================================================================
+  // Worktree Management (Phase 5)
+  // ============================================================================
+
+  /**
+   * Get all worktrees for a project
+   */
+  async getWorktrees(projectId: string): Promise<any[]> {
+    const response = await this.client.get<any[]>(
+      `/api/projects/${projectId}/worktrees`
+    );
+    return response.data;
+  }
+
+  /**
+   * Trigger merge for a worktree
+   */
+  async mergeWorktree(worktreeId: string): Promise<any> {
+    const response = await this.client.post<any>(
+      `/api/worktrees/${worktreeId}/merge`
+    );
+    return response.data;
+  }
+
+  /**
+   * Delete a worktree
+   */
+  async deleteWorktree(worktreeId: string): Promise<void> {
+    await this.client.delete(`/api/worktrees/${worktreeId}`);
+  }
+
+  // ============================================================================
+  // Task Management (Phase 5)
+  // ============================================================================
+
+  /**
+   * Update task status
+   */
+  async updateTaskStatus(taskId: number, status: string): Promise<any> {
+    const response = await this.client.patch<any>(
+      `/api/tasks/${taskId}/status`,
+      { status }
+    );
+    return response.data;
+  }
+
+  /**
+   * Assign task to worktree
+   */
+  async assignTaskWorktree(taskId: number, worktreeId: string): Promise<any> {
+    const response = await this.client.patch<any>(
+      `/api/tasks/${taskId}/worktree`,
+      { worktree_id: worktreeId }
+    );
+    return response.data;
+  }
 }
 
 // Export singleton instance

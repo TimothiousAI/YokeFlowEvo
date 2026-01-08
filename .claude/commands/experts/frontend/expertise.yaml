@@ -1,0 +1,148 @@
+# Frontend Domain Expertise
+# YokeFlow Next.js + React Web UI Patterns
+
+domain: frontend
+description: Next.js 14 App Router, React, TypeScript, Tailwind CSS, shadcn/ui
+confidence: 0.85
+usage_count: 2
+last_updated: 2025-01-07
+
+# Core technologies
+stack:
+  framework: Next.js 14
+  router: App Router
+  language: TypeScript
+  styling: Tailwind CSS
+  components: shadcn/ui
+  state: React hooks + SWR
+  drag_drop: "@dnd-kit (planned)"
+
+# Key files
+files:
+  layout: web-ui/src/app/layout.tsx
+  projects_page: web-ui/src/app/projects/page.tsx
+  project_detail: web-ui/src/app/projects/[id]/page.tsx
+  api_client: web-ui/src/lib/api.ts
+  components: web-ui/src/components/
+  # Phase 5: Kanban UI Components
+  kanban_board: web-ui/src/components/KanbanBoard.tsx
+  worktree_card: web-ui/src/components/WorktreeCard.tsx
+  execution_timeline: web-ui/src/components/ExecutionTimeline.tsx
+  parallel_control_panel: web-ui/src/components/ParallelControlPanel.tsx
+
+# Patterns learned
+patterns:
+  - name: server_component
+    description: Default to Server Components, use 'use client' only when needed
+    example: |
+      // Server Component (default)
+      export default async function Page({ params }) {
+        const data = await fetchData(params.id);
+        return <Component data={data} />;
+      }
+
+  - name: client_component
+    description: Use 'use client' for interactivity
+    example: |
+      'use client';
+      import { useState } from 'react';
+      export function InteractiveComponent() {
+        const [state, setState] = useState(null);
+        // ...
+      }
+
+  - name: api_route_handler
+    description: API routes in app/api/ directory
+    example: |
+      // app/api/projects/route.ts
+      export async function GET() {
+        const data = await fetch(BACKEND_URL);
+        return Response.json(data);
+      }
+
+  - name: swr_data_fetching
+    description: Use SWR for client-side data fetching with caching
+    example: |
+      const { data, error, isLoading, mutate } = useSWR(
+        `/api/projects/${id}`,
+        fetcher,
+        { refreshInterval: 5000 }
+      );
+
+  - name: shadcn_component
+    description: Use shadcn/ui components with Tailwind
+    example: |
+      import { Button } from "@/components/ui/button";
+      import { Card, CardHeader, CardContent } from "@/components/ui/card";
+
+# Anti-patterns to avoid
+anti_patterns:
+  - name: use_client_everywhere
+    description: Don't add 'use client' unless you need interactivity
+    bad: "'use client' on every component"
+    good: "Only on components with hooks, event handlers, browser APIs"
+
+  - name: prop_drilling
+    description: Avoid passing props through many layers
+    bad: "<A><B><C data={data}><D data={data}/></C></B></A>"
+    good: "Use context or composition"
+
+# Common imports
+imports:
+  - import { useState, useEffect, useCallback, useMemo } from 'react'
+  - import useSWR from 'swr'
+  - import { useParams, useRouter } from 'next/navigation'
+  - import { Button, Card, Badge } from '@/components/ui/*'
+  - import { formatDistanceToNow } from 'date-fns'
+  - import { GitBranch, Play, Pause, Square, Zap } from 'lucide-react'
+
+# Phase 5: Kanban/Swimlane UI Patterns
+phase5_patterns:
+  - name: kanban_board
+    description: Kanban board with column mapping from task status
+    example: |
+      // Map task status to Kanban columns
+      function getKanbanColumn(task) {
+        if (task.kanban_status) return task.kanban_status;
+        if (task.done) return 'done';
+        if (task.status === 'running') return 'in_progress';
+        if (task.status === 'review') return 'review';
+        return 'backlog';
+      }
+
+  - name: execution_timeline
+    description: Gantt-style timeline for batch visualization
+    example: |
+      // Batch status based on task completion
+      function getBatchStatus(batch, currentBatch, completedTasks) {
+        if (batch.task_ids.every(id => completedTasks.includes(id)))
+          return 'completed';
+        if (currentBatch === batch.batch_id) return 'running';
+        return 'pending';
+      }
+
+  - name: execution_mode_styling
+    description: Dynamic styling based on execution mode
+    example: |
+      const getModeStyle = (mode) => ({
+        parallel_running: { bg: 'bg-blue-500/20', text: 'text-blue-400' },
+        paused: { bg: 'bg-yellow-500/20', text: 'text-yellow-400' },
+        sequential: { bg: 'bg-gray-700', text: 'text-gray-300' },
+        idle: { bg: 'bg-gray-800', text: 'text-gray-400' }
+      }[mode]);
+
+  - name: worktree_status
+    description: Worktree card with merge/delete actions
+    example: |
+      // Status-based styling and actions
+      const canMerge = worktree.status === 'active' && agentStatus !== 'running';
+      const showActions = worktree.status !== 'merged';
+
+  - name: parallel_control_panel
+    description: Control buttons with state-based visibility
+    example: |
+      // Button visibility logic
+      const canStart = hasExecutionPlan && (mode === 'idle' || mode === 'parallel');
+      const canPause = mode === 'parallel_running';
+      const canResume = mode === 'paused';
+      const canStop = mode === 'parallel_running' || mode === 'paused';

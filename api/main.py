@@ -19,13 +19,17 @@ Design Philosophy:
 - Authentication-ready architecture
 """
 
+# CRITICAL: Set Windows-compatible event loop policy BEFORE any other imports
+# This must be done first to ensure asyncio subprocesses work correctly
 import sys
+import asyncio
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from uuid import UUID
-import asyncio
 import logging
 import tempfile
 import shutil
@@ -3867,6 +3871,501 @@ async def validate_dependencies(
 
     except Exception as e:
         logger.error(f"Error validating dependencies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Execution Plan API
+# =============================================================================
+
+@app.get("/api/projects/{project_id}/execution-plan")
+async def get_execution_plan(
+    project_id: str,
+    db=Depends(get_db)
+) -> Dict:
+    """
+    Get execution plan for a project.
+
+    Returns the execution plan built after initialization, including:
+    - Parallel batches
+    - Worktree assignments
+    - Predicted file conflicts
+    """
+    try:
+        plan = await db.get_execution_plan(UUID(project_id))
+        if not plan:
+            raise HTTPException(
+                status_code=404,
+                detail="No execution plan found. Run initialization first."
+            )
+        return plan
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting execution plan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/execution-plan/build")
+async def build_execution_plan(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db)
+) -> Dict:
+    """
+    Trigger execution plan building for a project.
+
+    This is normally called automatically after initialization,
+    but can be triggered manually to rebuild the plan.
+    """
+    try:
+        project = await db.get_project(UUID(project_id))
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Build plan in background
+        async def build_plan_task():
+            from core.execution_plan import ExecutionPlanBuilder
+
+            try:
+                builder = ExecutionPlanBuilder(db)
+                plan = await builder.build_plan(UUID(project_id))
+                await db.save_execution_plan(UUID(project_id), plan.to_dict())
+
+                # Broadcast WebSocket update
+                await manager.broadcast(project_id, {
+                    "type": "execution_plan_ready",
+                    "data": {
+                        "batches": len(plan.batches),
+                        "total_tasks": plan.total_tasks,
+                        "parallel_batches": plan.parallel_batches
+                    }
+                })
+                logger.info(f"Execution plan built for project {project_id}")
+            except Exception as e:
+                logger.error(f"Error building execution plan: {e}")
+
+        background_tasks.add_task(build_plan_task)
+
+        return {
+            "status": "building",
+            "message": "Execution plan build started"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error triggering execution plan build: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/projects/{project_id}/execution-plan")
+async def update_execution_plan(
+    project_id: str,
+    updates: Dict[str, Any],
+    db=Depends(get_db)
+) -> Dict:
+    """
+    Update execution plan with manual adjustments.
+
+    Allows overriding:
+    - worktree_assignments: Dict mapping task_id to worktree name
+    - batch_overrides: Dict mapping batch_id to batch properties
+    """
+    try:
+        plan = await db.get_execution_plan(UUID(project_id))
+        if not plan:
+            raise HTTPException(
+                status_code=404,
+                detail="No execution plan found"
+            )
+
+        # Apply updates
+        if "worktree_assignments" in updates:
+            plan["worktree_assignments"].update(updates["worktree_assignments"])
+
+        if "batch_overrides" in updates:
+            for batch_id_str, overrides in updates["batch_overrides"].items():
+                batch_id = int(batch_id_str)
+                for batch in plan["batches"]:
+                    if batch["batch_id"] == batch_id:
+                        batch.update(overrides)
+                        break
+
+        # Save updated plan
+        plan["metadata"]["last_modified"] = datetime.utcnow().isoformat()
+        plan["metadata"]["manually_modified"] = True
+        await db.save_execution_plan(UUID(project_id), plan)
+
+        return {"status": "updated", "plan": plan}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating execution plan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/execution-plan/summary")
+async def get_execution_plan_summary(
+    project_id: str,
+    db=Depends(get_db)
+) -> Dict:
+    """Get a summary of the execution plan."""
+    try:
+        plan = await db.get_execution_plan(UUID(project_id))
+        if not plan:
+            return {
+                "has_plan": False,
+                "message": "No execution plan found"
+            }
+
+        return {
+            "has_plan": True,
+            "created_at": plan.get("created_at"),
+            "total_batches": len(plan.get("batches", [])),
+            "total_tasks": sum(len(b.get("task_ids", [])) for b in plan.get("batches", [])),
+            "parallel_batches": sum(1 for b in plan.get("batches", []) if b.get("can_parallel")),
+            "conflicts_detected": len(plan.get("predicted_conflicts", [])),
+            "worktrees_used": len(set(plan.get("worktree_assignments", {}).values()))
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting execution plan summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Parallel Execution Endpoints
+# =============================================================================
+
+@app.post("/api/projects/{project_id}/parallel/start")
+async def start_parallel_execution(
+    project_id: UUID,
+    background_tasks: BackgroundTasks
+):
+    """
+    Start parallel execution for a project.
+
+    Uses the execution plan to execute batches in parallel.
+    This is typically called after Session 0 completes.
+    """
+    try:
+        async with get_db() as db:
+            # Verify project exists
+            project = await db.get_project(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+
+            # Verify project has execution plan
+            plan = await db.get_execution_plan(project_id)
+            if not plan:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No execution plan found. Run initialization first."
+                )
+
+            # Check not already running
+            mode = await db.get_project_execution_mode(project_id)
+            if mode == 'parallel_running':
+                raise HTTPException(
+                    status_code=409,
+                    detail="Parallel execution already in progress"
+                )
+
+        # Start in background
+        async def run_parallel():
+            try:
+                result = await orchestrator.start_parallel_execution(project_id)
+                logger.info(f"Parallel execution completed for {project_id}: {result}")
+            except Exception as e:
+                logger.error(f"Parallel execution failed for {project_id}: {e}")
+
+        background_tasks.add_task(run_parallel)
+
+        return {
+            "status": "started",
+            "message": "Parallel execution initiated",
+            "project_id": str(project_id)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting parallel execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/projects/{project_id}/parallel/status")
+async def get_parallel_status(project_id: UUID):
+    """Get current parallel execution status for a project."""
+    try:
+        async with get_db() as db:
+            project = await db.get_project(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+
+            metadata = project.get('metadata', {})
+            if isinstance(metadata, str):
+                import json
+                metadata = json.loads(metadata)
+
+            plan = await db.get_execution_plan(project_id)
+
+            return {
+                "project_id": str(project_id),
+                "execution_mode": metadata.get('execution_mode', 'sequential'),
+                "parallel_started_at": metadata.get('parallel_started_at'),
+                "parallel_completed_at": metadata.get('parallel_completed_at'),
+                "batches_total": len(plan.get('batches', [])) if plan else 0,
+                "parallel_result": metadata.get('parallel_result'),
+                "parallel_error": metadata.get('parallel_error')
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting parallel status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/parallel/stop")
+async def stop_parallel_execution(project_id: UUID):
+    """
+    Stop parallel execution gracefully.
+
+    Sets a flag that the batch executor checks between tasks.
+    Current task will complete before stopping.
+    """
+    try:
+        async with get_db() as db:
+            project = await db.get_project(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+
+            # Check if actually running
+            mode = await db.get_project_execution_mode(project_id)
+            if mode != 'parallel_running':
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Parallel execution not running (current mode: {mode})"
+                )
+
+            # Set stop flag
+            await db.update_project_metadata(project_id, {
+                'parallel_stop_requested': True,
+                'parallel_stop_requested_at': datetime.now().isoformat()
+            })
+
+        return {
+            "status": "stopping",
+            "message": "Stop requested. Current task will complete before stopping.",
+            "project_id": str(project_id)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error stopping parallel execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/parallel/pause")
+async def pause_parallel_execution(project_id: UUID):
+    """
+    Pause parallel execution.
+
+    Pauses after current batch completes. Running tasks will finish.
+    """
+    try:
+        async with get_db() as db:
+            project = await db.get_project(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+
+            # Check if actually running
+            mode = await db.get_project_execution_mode(project_id)
+            if mode != 'parallel_running':
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Parallel execution not running (current mode: {mode})"
+                )
+
+            # Set paused mode
+            await db.set_project_execution_mode(project_id, 'paused')
+            await db.update_project_metadata(project_id, {
+                'parallel_paused_at': datetime.now().isoformat()
+            })
+
+        return {
+            "status": "paused",
+            "message": "Parallel execution paused. Current batch will complete.",
+            "project_id": str(project_id)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error pausing parallel execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/projects/{project_id}/parallel/resume")
+async def resume_parallel_execution(
+    project_id: UUID,
+    background_tasks: BackgroundTasks
+):
+    """
+    Resume paused parallel execution.
+
+    Continues from where it left off with the next batch.
+    """
+    try:
+        async with get_db() as db:
+            project = await db.get_project(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+
+            # Check if actually paused
+            mode = await db.get_project_execution_mode(project_id)
+            if mode != 'paused':
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Parallel execution not paused (current mode: {mode})"
+                )
+
+            # Set back to running mode
+            await db.set_project_execution_mode(project_id, 'parallel_running')
+            await db.update_project_metadata(project_id, {
+                'parallel_resumed_at': datetime.now().isoformat()
+            })
+
+        # Resume execution in background
+        async def resume_execution():
+            try:
+                result = await orchestrator.resume_parallel_execution(project_id)
+                logger.info(f"Parallel execution resumed for {project_id}: {result}")
+            except Exception as e:
+                logger.error(f"Failed to resume parallel execution: {e}")
+
+        background_tasks.add_task(resume_execution)
+
+        return {
+            "status": "resuming",
+            "message": "Parallel execution resuming from next batch.",
+            "project_id": str(project_id)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resuming parallel execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Task Management API
+# =============================================================================
+
+@app.patch("/api/tasks/{task_id}/status")
+async def update_task_status(
+    task_id: int,
+    request: Dict = Body(...),
+    db=Depends(get_db)
+):
+    """
+    Update task status.
+
+    Valid statuses: pending, running, review, done, error
+    """
+    try:
+        status = request.get("status")
+        if not status:
+            raise HTTPException(status_code=400, detail="Status is required")
+
+        valid_statuses = ["pending", "running", "review", "done", "error"]
+        if status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status. Must be one of: {valid_statuses}"
+            )
+
+        # Find task to get project_id
+        task = await db.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        # Update task status
+        await db.update_task_status(task_id, status)
+
+        # Also update done flag if status is 'done'
+        if status == 'done':
+            await db.mark_task_done(task_id)
+
+        return {
+            "status": "success",
+            "task_id": task_id,
+            "new_status": status
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating task status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/tasks/{task_id}/worktree")
+async def assign_task_worktree(
+    task_id: int,
+    request: Dict = Body(...),
+    db=Depends(get_db)
+):
+    """
+    Assign a task to a worktree.
+
+    Updates the execution plan with the worktree assignment.
+    """
+    try:
+        worktree_id = request.get("worktree_id")
+        if not worktree_id:
+            raise HTTPException(status_code=400, detail="worktree_id is required")
+
+        # Get task to find project
+        task = await db.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        project_id = task.get("project_id")
+        if not project_id:
+            raise HTTPException(status_code=500, detail="Task has no project_id")
+
+        # Update execution plan with worktree assignment
+        plan = await db.get_execution_plan(UUID(str(project_id)))
+        if not plan:
+            raise HTTPException(
+                status_code=404,
+                detail="No execution plan found for project"
+            )
+
+        # Add worktree assignment
+        if "worktree_assignments" not in plan:
+            plan["worktree_assignments"] = {}
+        plan["worktree_assignments"][str(task_id)] = worktree_id
+
+        await db.save_execution_plan(UUID(str(project_id)), plan)
+
+        return {
+            "status": "success",
+            "task_id": task_id,
+            "worktree_id": worktree_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error assigning task to worktree: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
