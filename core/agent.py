@@ -5,6 +5,16 @@ Agent Session Logic
 Core agent interaction functions for running YokeFlow coding sessions.
 """
 
+import sys
+import io
+
+# Fix Windows console encoding for emoji/unicode characters
+# This must happen before any print() calls
+if sys.platform == 'win32':
+    # Reconfigure stdout/stderr to use UTF-8 with error replacement
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import asyncio
 import signal
 from pathlib import Path

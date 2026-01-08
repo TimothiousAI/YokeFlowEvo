@@ -355,6 +355,42 @@ class SessionLogger:
         self._write_txt(f"[ERROR: {type(error).__name__}]\n")
         self._write_txt(f"{error}\n\n")
 
+    def log_event(self, event_type: str, data: dict = None):
+        """
+        Log a generic event with optional data.
+
+        Args:
+            event_type: Type of event (e.g., "execution_plan_built", "project_bootstrapped")
+            data: Optional dictionary of event-specific data
+        """
+        timestamp = datetime.now().isoformat()
+
+        event_data = {
+            "event": event_type,
+            "timestamp": timestamp
+        }
+        if data:
+            event_data["data"] = data
+
+        self._write_jsonl(event_data)
+
+        # Human-readable log
+        self._write_txt(f"[Event: {event_type}]\n")
+        if data:
+            for key, value in data.items():
+                value_str = str(value)
+                if len(value_str) > 200:
+                    value_str = value_str[:200] + "...[truncated]"
+                self._write_txt(f"  {key}: {value_str}\n")
+        self._write_txt("\n")
+
+        # Emit WebSocket event
+        self._emit_event(event_type, {
+            "session_number": self.session_number,
+            "data": data,
+            "timestamp": timestamp
+        })
+
     def log_result_message(self, usage_data: dict):
         """Log ResultMessage with token usage and cost data (JSONL only)."""
         self._write_jsonl({

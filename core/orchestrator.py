@@ -17,7 +17,63 @@ Design Philosophy:
 - Foundation for future job queue integration (Celery/Redis)
 """
 
+import sys
 import asyncio
+import concurrent.futures
+
+# Windows Python 3.13 asyncio subprocess fix
+# The ProactorEventLoop is required for subprocess support on Windows
+# But uvicorn uses SelectorEventLoop, so we run Claude SDK in a separate thread
+async def _run_client_session_windows(
+    project_path, model, project_id, docker_container,
+    prompt, session_logger, verbose, session_manager, intervention_config
+):
+    """
+    Run Claude Agent SDK client session in a ProactorEventLoop for Windows subprocess support.
+
+    On Windows, uvicorn uses SelectorEventLoop which doesn't support subprocess operations.
+    The Claude Agent SDK spawns claude.exe as a subprocess, which fails with NotImplementedError.
+
+    This function runs the entire client session in a separate thread with its own
+    ProactorEventLoop, which properly supports subprocesses on Windows.
+
+    The client must be created inside the thread since asyncio clients can't cross event loops.
+
+    Returns (status, response, session_summary) tuple.
+    """
+    from core.agent import run_agent_session
+    from core.client import create_client
+
+    def run_with_proactor():
+        async def _session_coro():
+            # Create client inside ProactorEventLoop
+            client = create_client(
+                project_path,
+                model,
+                project_id=project_id,
+                docker_container=docker_container
+            )
+            async with client:
+                status, response, session_summary = await run_agent_session(
+                    client, prompt, project_path, logger=session_logger, verbose=verbose,
+                    session_manager=session_manager, progress_callback=None,  # Skip callbacks in thread
+                    intervention_config=intervention_config
+                )
+                return status, response, session_summary
+
+        loop = asyncio.ProactorEventLoop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_session_coro())
+        finally:
+            loop.close()
+
+    # Run in separate thread with ProactorEventLoop
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        result = await loop.run_in_executor(executor, run_with_proactor)
+    return result
+
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Callable, Awaitable, TYPE_CHECKING
 from datetime import datetime
@@ -862,8 +918,11 @@ class AgentOrchestrator:
                 await db.update_project(project_id, local_path=str(project_path))
             else:
                 project_path = Path(local_path)
-                if not project_path.exists():
-                    project_path.mkdir(parents=True, exist_ok=True)
+
+            # Ensure absolute path (critical for Windows thread isolation)
+            project_path = project_path.resolve()
+            if not project_path.exists():
+                project_path.mkdir(parents=True, exist_ok=True)
 
             # Determine session type
             epics = await db.list_epics(project_id)
@@ -1027,24 +1086,37 @@ class AgentOrchestrator:
 
                 heartbeat_task = asyncio.create_task(send_heartbeats())
 
-                # Run session
-                try:
-                    async with client:
-                        # Prepare intervention config
-                        intervention_config = {
-                            "enabled": self.config.intervention.enabled,
-                            "max_retries": self.config.intervention.max_retries,
-                            "notifications": {
-                                "enabled": bool(self.config.intervention.webhook_url),
-                                "webhook_url": self.config.intervention.webhook_url
-                            }
-                        }
+                # Prepare intervention config
+                intervention_config = {
+                    "enabled": self.config.intervention.enabled,
+                    "max_retries": self.config.intervention.max_retries,
+                    "notifications": {
+                        "enabled": bool(self.config.intervention.webhook_url),
+                        "webhook_url": self.config.intervention.webhook_url
+                    }
+                }
 
-                        status, response, session_summary = await run_agent_session(
-                            client, prompt, project_path, logger=session_logger, verbose=self.verbose,
-                            session_manager=session_manager, progress_callback=progress_callback,
-                            intervention_config=intervention_config
+                # Run session
+                # On Windows, we need to use ProactorEventLoop for subprocess support
+                # This requires running the client session in a separate thread
+                try:
+                    if sys.platform == 'win32':
+                        # Windows: Run in ProactorEventLoop thread for subprocess support
+                        # Must create client inside the thread since it can't cross event loops
+                        logger.info("Using Windows ProactorEventLoop for Claude Agent SDK subprocess")
+                        status, response, session_summary = await _run_client_session_windows(
+                            project_path, current_model, str(project_id), docker_container,
+                            prompt, session_logger, self.verbose,
+                            session_manager, intervention_config
                         )
+                    else:
+                        # Unix: Run directly in main event loop
+                        async with client:
+                            status, response, session_summary = await run_agent_session(
+                                client, prompt, project_path, logger=session_logger, verbose=self.verbose,
+                                session_manager=session_manager, progress_callback=progress_callback,
+                                intervention_config=intervention_config
+                            )
                 finally:
                     # Stop heartbeat task
                     if heartbeat_task:

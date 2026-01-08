@@ -2447,6 +2447,37 @@ async def start_session(project_id: str, session_config: SessionStart, backgroun
                             })
                             break
 
+                        # Check if Session 0 just completed and parallel mode should be used
+                        if session.session_type == "initializer" and session.status.value == "completed":
+                            db = await get_db()
+                            execution_mode = await db.get_project_execution_mode(project_uuid)
+
+                            if execution_mode == "parallel":
+                                logger.info(f"Session 0 completed, switching to parallel execution for {project_uuid}")
+                                await notify_project_update(str(project_uuid), {
+                                    "type": "switching_to_parallel",
+                                    "message": "Initialization complete, starting parallel execution"
+                                })
+
+                                # Start parallel execution instead of sequential loop
+                                try:
+                                    result = await orchestrator.start_parallel_execution(project_uuid)
+                                    await notify_project_update(str(project_uuid), {
+                                        "type": "parallel_execution_completed",
+                                        "success": result.success,
+                                        "tasks_completed": result.tasks_completed,
+                                        "tasks_failed": result.tasks_failed,
+                                        "batches_completed": result.batches_completed
+                                    })
+                                except Exception as e:
+                                    logger.error(f"Parallel execution failed: {e}")
+                                    await notify_project_update(str(project_uuid), {
+                                        "type": "parallel_execution_error",
+                                        "error": str(e)
+                                    })
+                                # Exit the auto-continue loop since parallel handled everything
+                                break
+
                 else:
                     # Single session mode (original behavior)
 
