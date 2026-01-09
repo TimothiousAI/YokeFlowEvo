@@ -36,6 +36,10 @@ import type {
   Screenshot,
   ContainerStatus,
   ContainerActionResponse,
+  SessionQuality,
+  ProjectQuality,
+  ProjectCosts,
+  CostsSummary,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -352,6 +356,57 @@ class ApiClient {
     const response = await this.client.post<any>(
       `/api/projects/${projectId}/complete-tests`,
       model ? { model } : {}
+    );
+    return response.data;
+  }
+
+  // ============================================================================
+  // Quality and Costs
+  // ============================================================================
+
+  /**
+   * Get quality metrics for a specific session
+   */
+  async getSessionQuality(projectId: string, sessionId: string): Promise<SessionQuality | null> {
+    try {
+      const response = await this.client.get<SessionQuality>(
+        `/api/projects/${projectId}/sessions/${sessionId}/quality`
+      );
+      return response.data;
+    } catch (err: any) {
+      if (err.response?.status === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Get project-level quality summary
+   */
+  async getProjectQuality(projectId: string): Promise<ProjectQuality> {
+    const response = await this.client.get<ProjectQuality>(
+      `/api/projects/${projectId}/quality`
+    );
+    return response.data;
+  }
+
+  /**
+   * Get cost breakdown for a project
+   */
+  async getProjectCosts(projectId: string): Promise<ProjectCosts> {
+    const response = await this.client.get<ProjectCosts>(
+      `/api/projects/${projectId}/costs`
+    );
+    return response.data;
+  }
+
+  /**
+   * Get cost summary for a project
+   */
+  async getProjectCostsSummary(projectId: string): Promise<CostsSummary> {
+    const response = await this.client.get<CostsSummary>(
+      `/api/projects/${projectId}/costs/summary`
     );
     return response.data;
   }

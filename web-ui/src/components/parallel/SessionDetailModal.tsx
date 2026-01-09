@@ -18,11 +18,15 @@ import {
   History,
   FileText,
   AlertCircle,
+  TrendingUp,
+  Shield,
+  TestTube,
+  Eye,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 import type { SessionInfo, ToolUse } from './hooks/useParallelState';
-import type { Screenshot } from '@/lib/types';
+import type { Screenshot, Task, SessionQuality, CostsSummary } from '@/lib/types';
 
 interface SessionDetailModalProps {
   isOpen: boolean;
@@ -92,6 +96,18 @@ export function SessionDetailModal({
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const [screenshotsLoading, setScreenshotsLoading] = useState(false);
 
+  // History tab state
+  const [epicTasks, setEpicTasks] = useState<Task[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Quality tab state
+  const [quality, setQuality] = useState<SessionQuality | null>(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
+
+  // Costs tab state
+  const [costs, setCosts] = useState<CostsSummary | null>(null);
+  const [costsLoading, setCostsLoading] = useState(false);
+
   // Find prev/next sessions for navigation
   const currentIndex = session ? allSessions.findIndex(s => s.taskId === session.taskId) : -1;
   const prevSession = currentIndex > 0 ? allSessions[currentIndex - 1] : null;
@@ -110,6 +126,27 @@ export function SessionDetailModal({
       loadScreenshots();
     }
   }, [isOpen, activeTab, session?.taskId]);
+
+  // Load history when history tab is selected
+  useEffect(() => {
+    if (isOpen && activeTab === 'history' && session?.epicId) {
+      loadHistory();
+    }
+  }, [isOpen, activeTab, session?.epicId]);
+
+  // Load quality when quality tab is selected
+  useEffect(() => {
+    if (isOpen && activeTab === 'quality' && session?.sessionId) {
+      loadQuality();
+    }
+  }, [isOpen, activeTab, session?.sessionId]);
+
+  // Load costs when costs tab is selected
+  useEffect(() => {
+    if (isOpen && activeTab === 'costs') {
+      loadCosts();
+    }
+  }, [isOpen, activeTab]);
 
   async function loadLogs() {
     if (!session?.sessionId) return;
@@ -153,6 +190,54 @@ export function SessionDetailModal({
       console.error('Failed to load screenshots:', err);
     } finally {
       setScreenshotsLoading(false);
+    }
+  }
+
+  async function loadHistory() {
+    if (!session?.epicId) return;
+    setHistoryLoading(true);
+    try {
+      // Get all tasks in the same epic
+      const tasks = await api.listTasks(projectId, { epic_id: session.epicId });
+      // Sort by completion: completed first (most recent), then pending
+      const sortedTasks = tasks.sort((a, b) => {
+        if (a.done && !b.done) return -1;
+        if (!a.done && b.done) return 1;
+        // Both done or both pending: sort by priority
+        return a.priority - b.priority;
+      });
+      setEpicTasks(sortedTasks);
+    } catch (err) {
+      console.error('Failed to load history:', err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function loadQuality() {
+    if (!session?.sessionId) return;
+    setQualityLoading(true);
+    try {
+      const qualityData = await api.getSessionQuality(projectId, session.sessionId);
+      setQuality(qualityData);
+    } catch (err) {
+      console.error('Failed to load quality:', err);
+      setQuality(null);
+    } finally {
+      setQualityLoading(false);
+    }
+  }
+
+  async function loadCosts() {
+    setCostsLoading(true);
+    try {
+      const costData = await api.getProjectCostsSummary(projectId);
+      setCosts(costData);
+    } catch (err) {
+      console.error('Failed to load costs:', err);
+      setCosts(null);
+    } finally {
+      setCostsLoading(false);
     }
   }
 
@@ -371,15 +456,68 @@ export function SessionDetailModal({
           {/* HISTORY TAB */}
           {activeTab === 'history' && (
             <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-200">Completed Tasks in Epic</h3>
+              <h3 className="text-lg font-medium text-gray-200">Tasks in Epic</h3>
               <p className="text-sm text-gray-400">
-                History of completed tasks in the "{session.epicName}" epic.
+                All tasks in the "{session.epicName}" epic.
               </p>
-              <div className="p-8 text-center text-gray-500">
-                <History className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>Task history will be displayed here.</p>
-                <p className="text-sm mt-1">Coming soon in a future update.</p>
-              </div>
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+                  <span className="ml-2 text-gray-400">Loading tasks...</span>
+                </div>
+              ) : epicTasks.length > 0 ? (
+                <div className="space-y-2">
+                  {epicTasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className={cn(
+                        'flex items-center gap-3 p-3 rounded-lg border',
+                        task.id === session.taskId
+                          ? 'bg-blue-500/20 border-blue-500/50'
+                          : task.done
+                          ? 'bg-green-500/10 border-green-500/30'
+                          : 'bg-gray-800/50 border-gray-700'
+                      )}
+                    >
+                      {task.done ? (
+                        <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
+                      ) : task.id === session.taskId ? (
+                        <Loader2 className="w-5 h-5 text-blue-400 animate-spin flex-shrink-0" />
+                      ) : (
+                        <Clock className="w-5 h-5 text-gray-500 flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <span className={cn(
+                          'text-sm block truncate',
+                          task.id === session.taskId ? 'text-blue-300' : 'text-gray-300'
+                        )}>
+                          #{task.id}: {task.description}
+                        </span>
+                        {task.completed_at && (
+                          <span className="text-xs text-gray-500">
+                            Completed {new Date(task.completed_at).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      <span className={cn(
+                        'text-xs px-2 py-0.5 rounded',
+                        task.done
+                          ? 'bg-green-500/20 text-green-400'
+                          : task.id === session.taskId
+                          ? 'bg-blue-500/20 text-blue-400'
+                          : 'bg-gray-700 text-gray-400'
+                      )}>
+                        {task.done ? 'Done' : task.id === session.taskId ? 'Current' : 'Pending'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center text-gray-500">
+                  <History className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No tasks found in this epic.</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -443,11 +581,132 @@ export function SessionDetailModal({
           {activeTab === 'quality' && (
             <div className="space-y-4">
               <h3 className="text-lg font-medium text-gray-200">Quality Metrics</h3>
-              <div className="p-8 text-center text-gray-500">
-                <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>Quality metrics will be displayed here.</p>
-                <p className="text-sm mt-1">Coming soon in a future update.</p>
-              </div>
+              {qualityLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+                  <span className="ml-2 text-gray-400">Loading quality data...</span>
+                </div>
+              ) : quality ? (
+                <div className="space-y-4">
+                  {/* Quick Check Summary */}
+                  <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                    <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                      <Shield className="w-4 h-4" />
+                      Quick Quality Check
+                    </h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-center gap-2">
+                        {quality.quick_check.commit_made ? (
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        )}
+                        <span className="text-sm text-gray-400">Commit Made</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {quality.quick_check.tests_pass ? (
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        )}
+                        <span className="text-sm text-gray-400">Tests Pass</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {quality.quick_check.browser_used ? (
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-yellow-500" />
+                        )}
+                        <span className="text-sm text-gray-400">Browser Verified</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {quality.quick_check.no_security_issues ? (
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        )}
+                        <span className="text-sm text-gray-400">No Security Issues</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Code Quality Score */}
+                  <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                    <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4" />
+                      Code Quality Score
+                    </h4>
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1">
+                        <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+                          <div
+                            className={cn(
+                              'h-full rounded-full transition-all',
+                              quality.quick_check.code_quality_score >= 80
+                                ? 'bg-green-500'
+                                : quality.quick_check.code_quality_score >= 60
+                                ? 'bg-yellow-500'
+                                : 'bg-red-500'
+                            )}
+                            style={{ width: `${quality.quick_check.code_quality_score}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className={cn(
+                        'text-lg font-bold',
+                        quality.quick_check.code_quality_score >= 80
+                          ? 'text-green-400'
+                          : quality.quick_check.code_quality_score >= 60
+                          ? 'text-yellow-400'
+                          : 'text-red-400'
+                      )}>
+                        {quality.quick_check.code_quality_score}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Deep Review Results */}
+                  {quality.deep_review && (
+                    <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                      <h4 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                        <Eye className="w-4 h-4" />
+                        Deep Review
+                      </h4>
+                      <p className="text-sm text-gray-400 mb-3">{quality.deep_review.summary}</p>
+                      {quality.deep_review.issues.length > 0 && (
+                        <div className="space-y-2">
+                          {quality.deep_review.issues.map((issue, idx) => (
+                            <div
+                              key={idx}
+                              className={cn(
+                                'p-2 rounded text-sm border',
+                                issue.severity === 'critical'
+                                  ? 'bg-red-500/10 border-red-500/30 text-red-300'
+                                  : issue.severity === 'major'
+                                  ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300'
+                                  : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+                              )}
+                            >
+                              <span className="font-medium capitalize">{issue.severity}</span>: {issue.description}
+                              {issue.file_path && (
+                                <span className="text-xs text-gray-500 ml-2">
+                                  {issue.file_path}:{issue.line_number}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-8 text-center text-gray-500">
+                  <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No quality data available for this session.</p>
+                  <p className="text-sm mt-1">Quality checks run after session completes.</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -455,11 +714,82 @@ export function SessionDetailModal({
           {activeTab === 'costs' && (
             <div className="space-y-4">
               <h3 className="text-lg font-medium text-gray-200">Cost Breakdown</h3>
-              <div className="p-8 text-center text-gray-500">
-                <DollarSign className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>Cost information will be displayed here.</p>
-                <p className="text-sm mt-1">Coming soon in a future update.</p>
-              </div>
+              {costsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+                  <span className="ml-2 text-gray-400">Loading cost data...</span>
+                </div>
+              ) : costs ? (
+                <div className="space-y-4">
+                  {/* Total Cost Card */}
+                  <div className="p-4 bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-lg border border-green-500/30">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-400">Total Project Cost</p>
+                        <p className="text-3xl font-bold text-green-400">
+                          ${costs.total_cost_usd.toFixed(4)}
+                        </p>
+                      </div>
+                      <DollarSign className="w-12 h-12 text-green-500/30" />
+                    </div>
+                  </div>
+
+                  {/* Cost Stats Grid */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                      <p className="text-sm text-gray-400">Total Sessions</p>
+                      <p className="text-2xl font-bold text-gray-200">{costs.total_sessions}</p>
+                    </div>
+                    <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                      <p className="text-sm text-gray-400">Avg Cost/Session</p>
+                      <p className="text-2xl font-bold text-gray-200">
+                        ${costs.average_cost_per_session.toFixed(4)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Cost by Model */}
+                  {costs.by_model && Object.keys(costs.by_model).length > 0 && (
+                    <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                      <h4 className="text-sm font-medium text-gray-300 mb-3">Cost by Model</h4>
+                      <div className="space-y-2">
+                        {Object.entries(costs.by_model).map(([model, cost]) => (
+                          <div key={model} className="flex items-center justify-between">
+                            <span className="text-sm text-gray-400 capitalize">
+                              {model.includes('opus') ? 'Opus' : model.includes('sonnet') ? 'Sonnet' : model.includes('haiku') ? 'Haiku' : model}
+                            </span>
+                            <span className="text-sm font-mono text-gray-300">
+                              ${(typeof cost === 'number' ? cost : 0).toFixed(4)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Estimated Remaining */}
+                  {costs.estimated_remaining > 0 && (
+                    <div className="p-4 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
+                      <div className="flex items-center gap-2 text-yellow-400">
+                        <TrendingUp className="w-4 h-4" />
+                        <span className="text-sm font-medium">Estimated Remaining</span>
+                      </div>
+                      <p className="text-xl font-bold text-yellow-300 mt-1">
+                        ${costs.estimated_remaining.toFixed(4)}
+                      </p>
+                      <p className="text-xs text-yellow-400/70 mt-1">
+                        Based on remaining tasks and average session cost
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-8 text-center text-gray-500">
+                  <DollarSign className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No cost data available yet.</p>
+                  <p className="text-sm mt-1">Costs are tracked as sessions complete.</p>
+                </div>
+              )}
             </div>
           )}
         </div>

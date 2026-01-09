@@ -175,7 +175,10 @@ export interface WebSocketMessage {
     | 'task_start'  // Parallel task started
     | 'task_complete'  // Parallel task completed
     | 'cost_update'  // Parallel cost update
-    | 'agent_status';  // Parallel agent status update
+    | 'agent_status'  // Parallel agent status update
+    | 'execution_plan_progress'  // Execution plan build progress
+    | 'execution_plan_ready'  // Execution plan ready
+    | 'execution_plan_error';  // Execution plan build error
   progress?: Progress;
   session_id?: string;
   status?: SessionStatus;
@@ -241,6 +244,16 @@ export interface WebSocketMessage {
   active_agent_count?: number;  // For agent_status event
   current_batch?: number;  // For agent_status event
   total_duration?: number;  // For agent_status event
+  // Execution plan event fields
+  data?: {
+    step?: string;  // For execution_plan_progress
+    detail?: string;  // For execution_plan_progress
+    progress?: number;  // For execution_plan_progress (0-1)
+    batches?: number;  // For execution_plan_ready
+    total_tasks?: number;  // For execution_plan_ready
+    parallel_batches?: number;  // For execution_plan_ready
+    error?: string;  // For execution_plan_error
+  };
 }
 
 export interface HealthResponse {
@@ -576,4 +589,76 @@ export interface ContainerActionResponse {
   started?: boolean;
   stopped?: boolean;
   deleted?: boolean;
+}
+
+/**
+ * Session quality check results
+ */
+export interface SessionQuality {
+  session_id: string;
+  quick_check: {
+    commit_made: boolean;
+    tests_pass: boolean;
+    browser_used: boolean;
+    no_security_issues: boolean;
+    code_quality_score: number;
+  };
+  deep_review?: {
+    overall_score: number;
+    issues: Array<{
+      severity: 'critical' | 'major' | 'minor';
+      category: string;
+      description: string;
+      file_path?: string;
+      line_number?: number;
+    }>;
+    summary: string;
+  };
+  created_at: string;
+}
+
+/**
+ * Project-level quality summary
+ */
+export interface ProjectQuality {
+  total_sessions: number;
+  sessions_with_issues: number;
+  average_quality_score: number;
+  browser_verification_rate: number;
+  test_pass_rate: number;
+  commit_rate: number;
+}
+
+/**
+ * Project costs breakdown
+ */
+export interface ProjectCosts {
+  by_model: Record<string, {
+    total_cost: number;
+    task_count: number;
+    total_tokens: number;
+  }>;
+  by_date: Record<string, {
+    total_cost: number;
+    task_count: number;
+  }>;
+  by_task_type: Record<string, {
+    total_cost: number;
+    task_count: number;
+  }>;
+  total_cost: number;
+  total_tasks: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
+/**
+ * Costs summary
+ */
+export interface CostsSummary {
+  total_cost_usd: number;
+  total_sessions: number;
+  average_cost_per_session: number;
+  by_model: Record<string, number>;
+  estimated_remaining: number;
 }
