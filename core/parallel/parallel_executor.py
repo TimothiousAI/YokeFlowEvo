@@ -215,57 +215,131 @@ class ParallelExecutor:
             if recovery['cleaned_count'] > 0:
                 logger.info(f"Cleaned {recovery['cleaned_count']} stale worktree entries")
 
-            # Process batches sequentially (batch N must complete before batch N+1)
-            for batch_number, task_ids in enumerate(dependency_graph.batches, start=1):
-                if self.cancel_event.is_set():
-                    logger.info("Execution cancelled")
-                    break
+            # NEW: Run independent batches in parallel
+            # Group batches by their dependencies
+            # Batches with depends_on=[] can run together
 
-                # Update current batch number for status tracking
-                self.current_batch_number = batch_number
+            # For now, use execution plan batches which are already grouped by worktree
+            # Each batch represents one epic's tasks - they can all run in parallel
 
-                logger.info(f"Processing batch {batch_number}/{len(dependency_graph.batches)}")
+            # Check if we have a stored execution plan with dependency info
+            stored_plan = await self.db.get_execution_plan(self.project_id) if self.db else None
 
-                # Emit batch_start event
-                if self.progress_callback:
-                    await self.progress_callback({
-                        "type": "batch_start",
-                        "batch_number": batch_number,
-                        "total_batches": len(dependency_graph.batches),
-                        "task_count": len(task_ids),
-                        "task_ids": task_ids
-                    })
+            if stored_plan and stored_plan.get('batches'):
+                # Use stored execution plan batches with dependency info
+                plan_batches = stored_plan['batches']
 
-                # Log current status
-                status = self.get_status()
-                logger.info(
-                    f"Status: Batch {status['current_batch']}/{len(dependency_graph.batches)}, "
-                    f"{len(task_ids)} tasks, "
-                    f"Duration: {status['total_duration']:.1f}s"
-                )
+                # Group batches by dependency level (batches with no deps run first together)
+                batches_by_level = {}  # level -> [(batch_id, task_ids)]
 
-                # Execute batch and collect results
-                batch_results = await self.execute_batch(batch_number, task_ids)
-                all_results.extend(batch_results)
+                for pb in plan_batches:
+                    batch_id = pb.get('batch_id', 0)
+                    task_ids = pb.get('task_ids', [])
+                    depends_on = pb.get('depends_on', [])
 
-                # Merge successful worktrees after each batch
-                # This will be implemented when we have worktree merge logic
-                successful = sum(1 for r in batch_results if r.success)
-                failed = len(batch_results) - successful
-                logger.info(
-                    f"Batch {batch_number} complete: {successful}/{len(batch_results)} tasks successful"
-                )
+                    if not depends_on:
+                        level = 0
+                    else:
+                        # Level is 1 + max level of dependencies
+                        level = 1  # For now, treat all with deps as level 1
 
-                # Emit batch_complete event
-                if self.progress_callback:
-                    await self.progress_callback({
-                        "type": "batch_complete",
-                        "batch_number": batch_number,
-                        "total_batches": len(dependency_graph.batches),
-                        "success_count": successful,
-                        "fail_count": failed,
-                        "total_cost": sum(r.cost for r in all_results)
-                    })
+                    if level not in batches_by_level:
+                        batches_by_level[level] = []
+                    batches_by_level[level].append((batch_id, task_ids))
+
+                # Execute each level in order, but batches within a level run in parallel
+                for level in sorted(batches_by_level.keys()):
+                    if self.cancel_event.is_set():
+                        logger.info("Execution cancelled")
+                        break
+
+                    level_batches = batches_by_level[level]
+                    logger.info(f"Executing dependency level {level}: {len(level_batches)} batches in parallel")
+
+                    # Emit batch_start events for all batches in this level
+                    for batch_id, task_ids in level_batches:
+                        self.current_batch_number = batch_id
+                        if self.progress_callback:
+                            await self.progress_callback({
+                                "type": "batch_start",
+                                "batch_number": batch_id,
+                                "total_batches": len(plan_batches),
+                                "task_count": len(task_ids),
+                                "task_ids": task_ids
+                            })
+
+                    # Execute all batches in this level in parallel
+                    batch_coroutines = [
+                        self.execute_batch(batch_id, task_ids)
+                        for batch_id, task_ids in level_batches
+                    ]
+
+                    level_results = await asyncio.gather(*batch_coroutines, return_exceptions=True)
+
+                    # Process results
+                    for (batch_id, task_ids), result in zip(level_batches, level_results):
+                        if isinstance(result, Exception):
+                            logger.error(f"Batch {batch_id} failed with exception: {result}")
+                            # Add failure results
+                            for tid in task_ids:
+                                all_results.append(ExecutionResult(
+                                    task_id=tid,
+                                    success=False,
+                                    duration=0.0,
+                                    error=f"Batch execution failed: {result}"
+                                ))
+                        else:
+                            all_results.extend(result)
+                            successful = sum(1 for r in result if r.success)
+                            failed = len(result) - successful
+                            logger.info(f"Batch {batch_id} complete: {successful}/{len(result)} tasks successful")
+
+                            # Emit batch_complete event
+                            if self.progress_callback:
+                                await self.progress_callback({
+                                    "type": "batch_complete",
+                                    "batch_number": batch_id,
+                                    "total_batches": len(plan_batches),
+                                    "success_count": successful,
+                                    "fail_count": failed,
+                                    "total_cost": sum(r.cost for r in all_results)
+                                })
+            else:
+                # Fallback: Use dependency resolver batches sequentially
+                logger.warning("No stored execution plan found, using sequential batch execution")
+                for batch_number, task_ids in enumerate(dependency_graph.batches, start=1):
+                    if self.cancel_event.is_set():
+                        logger.info("Execution cancelled")
+                        break
+
+                    self.current_batch_number = batch_number
+                    logger.info(f"Processing batch {batch_number}/{len(dependency_graph.batches)}")
+
+                    if self.progress_callback:
+                        await self.progress_callback({
+                            "type": "batch_start",
+                            "batch_number": batch_number,
+                            "total_batches": len(dependency_graph.batches),
+                            "task_count": len(task_ids),
+                            "task_ids": task_ids
+                        })
+
+                    batch_results = await self.execute_batch(batch_number, task_ids)
+                    all_results.extend(batch_results)
+
+                    successful = sum(1 for r in batch_results if r.success)
+                    failed = len(batch_results) - successful
+                    logger.info(f"Batch {batch_number} complete: {successful}/{len(batch_results)} tasks successful")
+
+                    if self.progress_callback:
+                        await self.progress_callback({
+                            "type": "batch_complete",
+                            "batch_number": batch_number,
+                            "total_batches": len(dependency_graph.batches),
+                            "success_count": successful,
+                            "fail_count": failed,
+                            "total_cost": sum(r.cost for r in all_results)
+                        })
 
             logger.info(f"Parallel execution complete: {len(all_results)} tasks processed")
             return all_results

@@ -11,6 +11,7 @@ import {
   Layers,
   CheckCircle2,
   AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BatchCard } from './BatchCard';
@@ -54,6 +55,10 @@ export function BatchExecutionView({
     recentLearnings,
     domainSummaries,
     totalCost,
+    isRebuilding,
+    rebuildProgress,
+    rebuildStep,
+    rebuildDetail,
     startExecution,
     stopExecution,
     pauseExecution,
@@ -171,11 +176,11 @@ export function BatchExecutionView({
   };
 
   const handleRebuild = async () => {
-    setIsLoading(true);
     try {
       await rebuildPlan();
-    } finally {
-      setIsLoading(false);
+    } catch (err) {
+      // Error is already handled in the hook
+      console.error('Rebuild failed:', err);
     }
   };
 
@@ -243,14 +248,57 @@ export function BatchExecutionView({
 
           <button
             onClick={handleRebuild}
-            disabled={isLoading || isRunning}
+            disabled={isRebuilding || isRunning}
             className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Rebuild execution plan"
           >
-            <RefreshCw className={cn('w-5 h-5', isLoading && 'animate-spin')} />
+            <RefreshCw className={cn('w-5 h-5', isRebuilding && 'animate-spin')} />
           </button>
         </div>
       </div>
+
+      {/* Rebuild Progress Indicator */}
+      {isRebuilding && (
+        <div className="p-4 rounded-lg bg-blue-900/30 border border-blue-500/30 animate-pulse">
+          <div className="flex items-center gap-3 mb-2">
+            <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+            <span className="text-sm font-medium text-blue-300">
+              Rebuilding Execution Plan...
+            </span>
+          </div>
+          <div className="mb-2">
+            <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                style={{ width: `${rebuildProgress * 100}%` }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-blue-400 font-mono">
+              {rebuildStep?.replace(/_/g, ' ').toUpperCase() || 'STARTING'}
+            </span>
+            <span className="text-gray-400">
+              {rebuildDetail || 'Please wait...'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Rebuild Error Display */}
+      {!isRebuilding && rebuildStep === 'error' && rebuildDetail && (
+        <div className="p-4 rounded-lg bg-red-900/30 border border-red-500/30">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-red-400" />
+            <span className="text-sm font-medium text-red-300">
+              Rebuild Failed
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-red-400">
+            {rebuildDetail}
+          </p>
+        </div>
+      )}
 
       {/* Progress Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

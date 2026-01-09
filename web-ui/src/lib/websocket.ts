@@ -35,6 +35,10 @@ interface UseProjectWebSocketOptions {
   onAgentComplete?: (taskId: number, success: boolean, duration: number, error?: string) => void;
   onParallelToolUse?: (taskId: number, toolName: string, toolId: string) => void;
   onParallelToolResult?: (taskId: number, toolId: string, isError: boolean) => void;
+  // Execution plan callbacks
+  onExecutionPlanProgress?: (step: string, detail: string, progress: number) => void;
+  onExecutionPlanReady?: (batches: number, totalTasks: number, parallelBatches: number) => void;
+  onExecutionPlanError?: (error: string) => void;
 }
 
 export function useProjectWebSocket(
@@ -66,6 +70,10 @@ export function useProjectWebSocket(
   const onAgentCompleteRef = useRef(options?.onAgentComplete);
   const onParallelToolUseRef = useRef(options?.onParallelToolUse);
   const onParallelToolResultRef = useRef(options?.onParallelToolResult);
+  // Execution plan callback refs
+  const onExecutionPlanProgressRef = useRef(options?.onExecutionPlanProgress);
+  const onExecutionPlanReadyRef = useRef(options?.onExecutionPlanReady);
+  const onExecutionPlanErrorRef = useRef(options?.onExecutionPlanError);
 
   useEffect(() => {
     onSessionCompleteRef.current = options?.onSessionComplete;
@@ -81,7 +89,11 @@ export function useProjectWebSocket(
     onAgentCompleteRef.current = options?.onAgentComplete;
     onParallelToolUseRef.current = options?.onParallelToolUse;
     onParallelToolResultRef.current = options?.onParallelToolResult;
-  }, [options?.onSessionComplete, options?.onSessionStarted, options?.onAssistantMessage, options?.onToolUse, options?.onTaskUpdated, options?.onTestUpdated, options?.onPromptImprovementComplete, options?.onPromptImprovementFailed, options?.onAgentStart, options?.onAgentComplete, options?.onParallelToolUse, options?.onParallelToolResult]);
+    // Update execution plan refs
+    onExecutionPlanProgressRef.current = options?.onExecutionPlanProgress;
+    onExecutionPlanReadyRef.current = options?.onExecutionPlanReady;
+    onExecutionPlanErrorRef.current = options?.onExecutionPlanError;
+  }, [options?.onSessionComplete, options?.onSessionStarted, options?.onAssistantMessage, options?.onToolUse, options?.onTaskUpdated, options?.onTestUpdated, options?.onPromptImprovementComplete, options?.onPromptImprovementFailed, options?.onAgentStart, options?.onAgentComplete, options?.onParallelToolUse, options?.onParallelToolResult, options?.onExecutionPlanProgress, options?.onExecutionPlanReady, options?.onExecutionPlanError]);
 
   const connect = useCallback(() => {
     if (!projectId) return;
@@ -276,6 +288,28 @@ export function useProjectWebSocket(
               console.error(`[WebSocket] Prompt improvement analysis failed:`, data.error);
               if (onPromptImprovementFailedRef.current && data.analysis_id) {
                 onPromptImprovementFailedRef.current(data.analysis_id, data.error || 'Unknown error');
+              }
+              break;
+
+            // Execution plan events
+            case 'execution_plan_progress':
+              console.log(`[WebSocket] Execution plan progress: ${data.data?.step} (${Math.round((data.data?.progress || 0) * 100)}%)`);
+              if (onExecutionPlanProgressRef.current && data.data) {
+                onExecutionPlanProgressRef.current(data.data.step || '', data.data.detail || '', data.data.progress || 0);
+              }
+              break;
+
+            case 'execution_plan_ready':
+              console.log(`[WebSocket] Execution plan ready: ${data.data?.batches} batches, ${data.data?.total_tasks} tasks`);
+              if (onExecutionPlanReadyRef.current && data.data) {
+                onExecutionPlanReadyRef.current(data.data.batches || 0, data.data.total_tasks || 0, data.data.parallel_batches || 0);
+              }
+              break;
+
+            case 'execution_plan_error':
+              console.error(`[WebSocket] Execution plan error:`, data.data?.error);
+              if (onExecutionPlanErrorRef.current) {
+                onExecutionPlanErrorRef.current(data.data?.error || data.error || 'Unknown error');
               }
               break;
           }

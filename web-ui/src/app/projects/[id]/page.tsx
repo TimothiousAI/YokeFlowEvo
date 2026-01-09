@@ -120,6 +120,21 @@ export default function ProjectDetailPage() {
     onParallelToolResult: (taskId, toolId, isError) => {
       forwardToParallelHandler('tool_result', { task_id: taskId, tool_id: toolId, is_error: isError });
     },
+    // Execution plan callbacks
+    onExecutionPlanProgress: (step, detail, progress) => {
+      console.log(`[ProjectDetail] Execution plan progress: ${step} (${Math.round(progress * 100)}%)`);
+      forwardToParallelHandler('execution_plan_progress', { data: { step, detail, progress } });
+    },
+    onExecutionPlanReady: (batches, totalTasks, parallelBatches) => {
+      console.log(`[ProjectDetail] Execution plan ready: ${batches} batches, ${totalTasks} tasks`);
+      forwardToParallelHandler('execution_plan_ready', { data: { batches, total_tasks: totalTasks, parallel_batches: parallelBatches } });
+      // Also reload parallel status
+      loadParallelStatus();
+    },
+    onExecutionPlanError: (error) => {
+      console.error(`[ProjectDetail] Execution plan error: ${error}`);
+      forwardToParallelHandler('execution_plan_error', { data: { error } });
+    },
   });
 
   useEffect(() => {

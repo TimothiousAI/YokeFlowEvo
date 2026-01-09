@@ -138,6 +138,12 @@ export function useParallelState(options: UseParallelStateOptions) {
   const [domainSummaries, setDomainSummaries] = useState<DomainSummary[]>([]);
   const [totalCost, setTotalCost] = useState(0);
 
+  // Rebuild progress state
+  const [isRebuilding, setIsRebuilding] = useState(false);
+  const [rebuildProgress, setRebuildProgress] = useState(0);
+  const [rebuildStep, setRebuildStep] = useState<string | null>(null);
+  const [rebuildDetail, setRebuildDetail] = useState<string | null>(null);
+
   // Refs for intervals
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -455,8 +461,33 @@ export function useParallelState(options: UseParallelStateOptions) {
       case 'cost_update':
         setTotalCost(message.cumulative_cost || 0);
         break;
+
+      case 'execution_plan_progress':
+        // Rebuild progress streaming
+        setIsRebuilding(true);
+        setRebuildProgress(message.data?.progress || 0);
+        setRebuildStep(message.data?.step || null);
+        setRebuildDetail(message.data?.detail || null);
+        break;
+
+      case 'execution_plan_ready':
+        // Rebuild complete
+        setIsRebuilding(false);
+        setRebuildProgress(1);
+        setRebuildStep(null);
+        setRebuildDetail(null);
+        loadParallelStatus();
+        break;
+
+      case 'execution_plan_error':
+        // Rebuild failed
+        setIsRebuilding(false);
+        setRebuildProgress(0);
+        setRebuildStep('error');
+        setRebuildDetail(message.data?.error || message.error || 'Build failed');
+        break;
     }
-  }, [onSessionStart, onSessionComplete, onBatchComplete, onExpertiseLearned, loadWorktrees, loadExpertise]);
+  }, [onSessionStart, onSessionComplete, onBatchComplete, onExpertiseLearned, loadWorktrees, loadExpertise, loadParallelStatus]);
 
   // Actions
   const startExecution = useCallback(async () => {
@@ -504,13 +535,21 @@ export function useParallelState(options: UseParallelStateOptions) {
 
   const rebuildPlan = useCallback(async () => {
     try {
+      // Set initial rebuild state (WebSocket will update progress)
+      setIsRebuilding(true);
+      setRebuildProgress(0);
+      setRebuildStep('starting');
+      setRebuildDetail('Initiating rebuild...');
       await api.rebuildExecutionPlan(projectId);
-      await loadParallelStatus();
+      // Note: loadParallelStatus will be called by execution_plan_ready handler
     } catch (err) {
       console.error('Failed to rebuild execution plan:', err);
+      setIsRebuilding(false);
+      setRebuildStep(null);
+      setRebuildDetail(err instanceof Error ? err.message : 'Build failed');
       throw err;
     }
-  }, [projectId, loadParallelStatus]);
+  }, [projectId]);
 
   const triggerMerge = useCallback(async (worktreeId: string) => {
     try {
@@ -535,6 +574,12 @@ export function useParallelState(options: UseParallelStateOptions) {
     recentLearnings,
     domainSummaries,
     totalCost,
+
+    // Rebuild progress state
+    isRebuilding,
+    rebuildProgress,
+    rebuildStep,
+    rebuildDetail,
 
     // Actions
     startExecution,
