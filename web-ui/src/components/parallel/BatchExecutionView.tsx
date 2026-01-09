@@ -18,6 +18,7 @@ import { BatchConnector, MergeConnector, ArrowConnector } from './BatchConnector
 import { MergePoint } from './MergePoint';
 import { TaskQueue } from './TaskQueue';
 import { ExpertiseMiniPanel } from './ExpertiseMiniPanel';
+import { SessionDetailModal } from './SessionDetailModal';
 import { useParallelState } from './hooks/useParallelState';
 import type { SessionInfo } from './hooks/useParallelState';
 
@@ -26,6 +27,8 @@ interface BatchExecutionViewProps {
   onViewExpertise?: () => void;
   onViewSessionDetails?: (taskId: number) => void;
   className?: string;
+  // Ref to expose WebSocket message handler
+  wsHandlerRef?: React.MutableRefObject<((message: any) => void) | null>;
 }
 
 function formatCost(cost: number): string {
@@ -37,6 +40,7 @@ export function BatchExecutionView({
   onViewExpertise,
   onViewSessionDetails,
   className,
+  wsHandlerRef,
 }: BatchExecutionViewProps) {
   const {
     isRunning,
@@ -57,10 +61,26 @@ export function BatchExecutionView({
     rebuildPlan,
     triggerMerge,
     refresh,
+    handleWebSocketMessage,
   } = useParallelState({ projectId });
+
+  // Expose WebSocket handler via ref for parent to forward events
+  useEffect(() => {
+    if (wsHandlerRef) {
+      wsHandlerRef.current = handleWebSocketMessage;
+    }
+    return () => {
+      if (wsHandlerRef) {
+        wsHandlerRef.current = null;
+      }
+    };
+  }, [wsHandlerRef, handleWebSocketMessage]);
 
   const [expandedBatches, setExpandedBatches] = useState<Set<number>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
+
+  // Modal state for session details
+  const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
 
   // Auto-expand current batch
   useEffect(() => {
@@ -85,6 +105,24 @@ export function BatchExecutionView({
   // Get sessions for a specific batch
   const getSessionsForBatch = useCallback((batch: typeof batches[0]): SessionInfo[] => {
     return runningSessions.filter(s => batch.taskIds.includes(s.taskId));
+  }, [runningSessions]);
+
+  // Handler for viewing session details in modal
+  const handleViewSessionDetails = useCallback((taskId: number) => {
+    const session = runningSessions.find(s => s.taskId === taskId);
+    if (session) {
+      setSelectedSession(session);
+    }
+    // Also call the external handler if provided
+    onViewSessionDetails?.(taskId);
+  }, [runningSessions, onViewSessionDetails]);
+
+  // Handler for modal navigation between sessions
+  const handleNavigateSession = useCallback((taskId: number) => {
+    const session = runningSessions.find(s => s.taskId === taskId);
+    if (session) {
+      setSelectedSession(session);
+    }
   }, [runningSessions]);
 
   // Calculate overall progress
@@ -166,18 +204,9 @@ export function BatchExecutionView({
           )}
         </div>
 
-        {/* Controls */}
+        {/* Controls - Only show when running (Start is handled by main button) */}
         <div className="flex items-center gap-2">
-          {!isRunning ? (
-            <button
-              onClick={handleStart}
-              disabled={isLoading || batches.length === 0}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Play className="w-4 h-4" />
-              Start
-            </button>
-          ) : (
+          {isRunning && (
             <>
               <button
                 onClick={handlePause}
@@ -326,10 +355,10 @@ export function BatchExecutionView({
                   worktrees={worktrees}
                   isExpanded={expandedBatches.has(batch.batchId)}
                   onToggleExpand={() => toggleBatchExpand(batch.batchId)}
-                  onViewSessionDetails={onViewSessionDetails}
+                  onViewSessionDetails={handleViewSessionDetails}
                   onStopSession={isCurrentBatch ? (taskId) => {
-                    // Could implement individual task stopping
-                    console.log('Stop task:', taskId);
+                    // TODO: Implement individual task stopping
+                    // For now, only batch-level stopping is supported
                   } : undefined}
                 />
 
@@ -360,6 +389,16 @@ export function BatchExecutionView({
           onExpandBatch={(batchId) => toggleBatchExpand(batchId)}
         />
       )}
+
+      {/* Session Detail Modal */}
+      <SessionDetailModal
+        isOpen={selectedSession !== null}
+        onClose={() => setSelectedSession(null)}
+        session={selectedSession}
+        allSessions={runningSessions}
+        onNavigate={handleNavigateSession}
+        projectId={projectId}
+      />
     </div>
   );
 }

@@ -50,9 +50,21 @@ function getPhaseColor(phase: string): string {
       return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
     case 'completed':
       return 'bg-green-500/20 text-green-400 border-green-500/30';
+    case 'failed':
+      return 'bg-red-500/20 text-red-400 border-red-500/30';
     default:
       return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
   }
+}
+
+function formatToolName(name: string): string {
+  // Make tool names more readable
+  return name
+    .replace(/_/g, ' ')
+    .replace(/([A-Z])/g, ' $1')
+    .trim()
+    .toLowerCase()
+    .replace(/^./, s => s.toUpperCase());
 }
 
 export function SessionCard({
@@ -66,13 +78,25 @@ export function SessionCard({
     ? Math.round((session.progress.completed / session.progress.total) * 100)
     : 0;
 
+  // Handle card click - open details modal
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't trigger card click if clicking on buttons
+    if ((e.target as HTMLElement).closest('button')) {
+      return;
+    }
+    onViewDetails?.();
+  };
+
   return (
     <div
+      onClick={handleCardClick}
       className={cn(
         'relative rounded-lg border bg-gray-800/50 backdrop-blur-sm transition-all duration-200',
         isRunning && 'session-card-running',
         !isRunning && session.phase === 'completed' && 'border-green-500/50 bg-green-500/5',
         !isRunning && session.phase !== 'completed' && 'border-gray-700',
+        // Make card clickable with hover effects
+        onViewDetails && 'cursor-pointer hover:border-blue-500/50 hover:bg-gray-800/70',
         className
       )}
     >
@@ -160,7 +184,7 @@ export function SessionCard({
 
         {/* Progress Dots */}
         <div className="flex items-center gap-1 mb-3">
-          {Array.from({ length: session.progress.total }).map((_, i) => (
+          {Array.from({ length: Math.min(session.progress.total, 10) }).map((_, i) => (
             <div
               key={i}
               className={cn(
@@ -173,7 +197,49 @@ export function SessionCard({
               )}
             />
           ))}
+          {session.progress.total > 10 && (
+            <span className="text-xs text-gray-500 ml-1">+{session.progress.total - 10}</span>
+          )}
         </div>
+
+        {/* Streaming Output - Current Tool */}
+        {isRunning && session.currentTool && (
+          <div className="mb-3 p-2 bg-gray-900/50 rounded border border-gray-700">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-3 h-3 text-yellow-400 animate-spin" />
+              <span className="text-xs text-yellow-400 font-medium">
+                {formatToolName(session.currentTool)}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Recent Tool Uses */}
+        {session.toolUses && session.toolUses.length > 0 && (
+          <div className="mb-3 max-h-24 overflow-y-auto">
+            <div className="text-xs text-gray-500 mb-1">Recent activity:</div>
+            <div className="space-y-0.5">
+              {session.toolUses.slice(-5).reverse().map((tool, idx) => (
+                <div
+                  key={`${tool.id}-${idx}`}
+                  className="flex items-center gap-2 text-xs text-gray-400"
+                >
+                  <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
+                  <span className="truncate">{formatToolName(tool.name)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Error Message */}
+        {session.phase === 'failed' && session.error && (
+          <div className="mb-3 p-2 bg-red-500/10 rounded border border-red-500/30">
+            <div className="text-xs text-red-400 line-clamp-2">
+              {session.error}
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between text-xs text-gray-500">

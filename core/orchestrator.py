@@ -497,6 +497,12 @@ class AgentOrchestrator:
 
                     project_path = project.get('local_path')
 
+                    # Mark as parallel running
+                    await db.update_project_metadata(project_id, {
+                        'execution_mode': 'parallel_running',
+                        'parallel_started_at': datetime.now().isoformat()
+                    })
+
                 # Create ParallelExecutor
                 executor = ParallelExecutor(
                     project_path=project_path,
@@ -513,6 +519,19 @@ class AgentOrchestrator:
                 successful = sum(1 for r in results if r.success)
                 total = len(results)
                 logger.info(f"Parallel execution complete: {successful}/{total} tasks successful")
+
+                # Update execution mode to completed/failed
+                async with DatabaseManager() as db:
+                    final_status = 'parallel_completed' if successful == total else 'parallel_failed'
+                    await db.update_project_metadata(project_id, {
+                        'execution_mode': final_status,
+                        'parallel_completed_at': datetime.now().isoformat(),
+                        'parallel_result': {
+                            'success': successful == total,
+                            'tasks_successful': successful,
+                            'tasks_total': total
+                        }
+                    })
 
                 # Return a SessionInfo-like object for the parallel execution
                 # Note: This is a simplified representation since parallel execution
@@ -533,6 +552,16 @@ class AgentOrchestrator:
 
             except Exception as e:
                 logger.error(f"Parallel execution failed: {e}", exc_info=True)
+                # Update execution mode to failed
+                try:
+                    async with DatabaseManager() as db:
+                        await db.update_project_metadata(project_id, {
+                            'execution_mode': 'parallel_failed',
+                            'parallel_completed_at': datetime.now().isoformat(),
+                            'parallel_error': str(e)
+                        })
+                except Exception as db_err:
+                    logger.error(f"Failed to update parallel execution status: {db_err}")
                 # Return error session info
                 return SessionInfo(
                     session_id=None,

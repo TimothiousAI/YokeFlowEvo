@@ -98,6 +98,13 @@ class WorktreeManager:
         worktree_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"Worktree directory initialized at {worktree_path}")
 
+        # Prune stale git worktree registrations (cleanup from failed runs)
+        try:
+            await self._run_git(['worktree', 'prune'], timeout=30)
+            logger.info("Pruned stale git worktree registrations")
+        except GitCommandError as e:
+            logger.warning(f"Could not prune worktrees: {e}")
+
         # Load existing worktrees from database if available
         if self.db:
             try:
@@ -380,11 +387,27 @@ class WorktreeManager:
                 )
                 logger.info(f"Created branch {branch_name} from {main_branch}")
 
-            # Create worktree directory if it exists (cleanup old worktree)
+            # Clean up existing worktree if it exists (from failed runs)
             if worktree_path.exists():
-                logger.warning(f"Worktree directory already exists, removing: {worktree_path}")
-                import shutil
-                shutil.rmtree(worktree_path, ignore_errors=True)
+                logger.warning(f"Worktree directory already exists, cleaning up: {worktree_path}")
+                try:
+                    # Try to properly remove via git first
+                    await self._run_git(
+                        ['worktree', 'remove', '--force', worktree_path_str],
+                        timeout=30
+                    )
+                    logger.info(f"Removed existing git worktree: {worktree_path}")
+                except GitCommandError as e:
+                    logger.warning(f"Git worktree remove failed: {e}, trying manual cleanup")
+                    # Prune and then manual cleanup
+                    try:
+                        await self._run_git(['worktree', 'prune'], timeout=30)
+                    except GitCommandError:
+                        pass
+                    # Manual directory removal
+                    import shutil
+                    shutil.rmtree(worktree_path, ignore_errors=True)
+                    logger.info(f"Manually removed worktree directory: {worktree_path}")
 
             # Create worktree
             await self._run_git(

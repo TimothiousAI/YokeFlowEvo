@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -65,6 +65,16 @@ export default function ProjectDetailPage() {
   const [activePanel, setActivePanel] = useState<'session' | 'project'>('session');
   const [detailsModalTab, setDetailsModalTab] = useState<'settings' | 'environment' | 'epics' | 'expertise'>('settings');
 
+  // Ref to forward WebSocket events to BatchExecutionView
+  const parallelWsHandlerRef = useRef<((message: any) => void) | null>(null);
+
+  // Forward parallel WebSocket events to BatchExecutionView's handler
+  const forwardToParallelHandler = useCallback((type: string, data: any) => {
+    if (parallelWsHandlerRef.current) {
+      parallelWsHandlerRef.current({ type, ...data });
+    }
+  }, []);
+
   // WebSocket for real-time updates
   const {
     progress: wsProgress,
@@ -96,12 +106,30 @@ export default function ProjectDetailPage() {
       console.log(`[ProjectDetail] Test ${testId} updated: passes=${passes}`);
       loadProject();
     },
+    // Forward parallel execution events to BatchExecutionView
+    onAgentStart: (taskId, epicId, description, worktree) => {
+      console.log(`[ProjectDetail] Agent started for task ${taskId}`);
+      forwardToParallelHandler('agent_start', { task_id: taskId, epic_id: epicId, task_description: description, worktree });
+    },
+    onAgentComplete: (taskId, success, duration, error) => {
+      console.log(`[ProjectDetail] Agent completed task ${taskId}: success=${success}`);
+      forwardToParallelHandler('agent_complete', { task_id: taskId, success, duration, error });
+      // Also reload project to update progress
+      loadProject();
+    },
+    onParallelToolUse: (taskId, toolName, toolId) => {
+      forwardToParallelHandler('tool_use', { task_id: taskId, tool_name: toolName, tool_id: toolId });
+    },
+    onParallelToolResult: (taskId, toolId, isError) => {
+      forwardToParallelHandler('tool_result', { task_id: taskId, tool_id: toolId, is_error: isError });
+    },
   });
 
   useEffect(() => {
     loadProject();
     loadSessions();
     loadSettings();
+    loadParallelStatus();  // Load parallel status on page load
   }, [projectId]);
 
   // Update progress from WebSocket
@@ -190,17 +218,35 @@ export default function ProjectDetailPage() {
     setIsStartingCoding(true);
     setError(null);
     try {
-      await api.startCodingSessions(
-        projectId,
-        projectSettings?.coding_model,
-        projectSettings?.max_iterations
-      );
-      // Don't reload immediately - wait for WebSocket session_started event
-      // The onSessionStarted callback will handle loading sessions
-      // Keep isStartingCoding=true until session actually starts
-      console.log('[StartCodingSessions] Request sent, waiting for session to start...');
-      // Switch to Current Session tab to show the starting session
-      setActiveTab('current');
+      // Check if we have a parallel execution plan
+      const parallelStatus = await api.getParallelStatus(projectId);
+      const hasParallelPlan = parallelStatus?.execution_plan?.batches?.length > 1 ||
+        (parallelStatus?.execution_plan?.metadata?.parallel_possible || 0) > 0;
+
+      if (hasParallelPlan) {
+        // Use parallel execution
+        console.log('[StartCodingSessions] Parallel execution plan detected, starting parallel mode...');
+        await api.startParallelExecution(projectId);
+        setIsParallelRunning(true);
+        toast.success('Parallel execution started', {
+          description: `${parallelStatus.execution_plan.batches.length} batches will run in parallel`
+        });
+        loadParallelStatus();
+      } else {
+        // Use sequential execution
+        console.log('[StartCodingSessions] No parallel plan, using sequential mode...');
+        await api.startCodingSessions(
+          projectId,
+          projectSettings?.coding_model,
+          projectSettings?.max_iterations
+        );
+        // Don't reload immediately - wait for WebSocket session_started event
+        // The onSessionStarted callback will handle loading sessions
+        // Keep isStartingCoding=true until session actually starts
+        console.log('[StartCodingSessions] Request sent, waiting for session to start...');
+        // Switch to Current Session tab to show the starting session
+        setActiveTab('current');
+      }
     } catch (err: any) {
       console.error('Failed to start coding sessions:', err);
       const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
@@ -812,6 +858,7 @@ export default function ProjectDetailPage() {
         <div className="mb-6">
           <BatchExecutionView
             projectId={projectId}
+            wsHandlerRef={parallelWsHandlerRef}
             onViewExpertise={() => {
               setDetailsModalTab('expertise');
               setActivePanel('project');
@@ -837,7 +884,10 @@ export default function ProjectDetailPage() {
                   : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
               }`}
             >
-              Current Session
+              {isParallelRunning ? 'Parallel Sessions' : 'Current Session'}
+              {isParallelRunning && (
+                <span className="ml-2 inline-flex h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              )}
             </button>
             <button
               onClick={() => setActiveTab('history')}
@@ -907,22 +957,40 @@ export default function ProjectDetailPage() {
           {/* Tab Content */}
           <div className="p-6">
             {activeTab === 'current' && (
-              <CurrentSession
-                session={sessions[0] || null}
-                nextTask={next_task}
-                onStopSession={handleStopSession}
-                onStopAfterCurrent={handleStopAfterCurrent}
-                onRefreshSessions={handleRefreshSessions}
-                isStopping={isStopping}
-                isStoppingAfterCurrent={isStoppingAfterCurrent}
-                isRefreshingSessions={isRefreshingSessions}
-                maxIterations={projectSettings?.max_iterations}
-                toolCount={toolCount}
-                assistantMessages={assistantMessages}
-                isInitialized={is_initialized}
-                isInitializing={isInitializing}
-                isStartingCoding={isStartingCoding}
-              />
+              isParallelRunning ? (
+                <div className="text-center py-12">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-500/20 mb-4">
+                    <svg className="w-8 h-8 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-gray-100 mb-2">Parallel Execution Active</h3>
+                  <p className="text-gray-400 mb-4">
+                    Multiple agents are working concurrently. View progress in the Parallel Execution panel above.
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Streaming output for each agent will appear in the session cards above.
+                  </p>
+                </div>
+              ) : (
+                <CurrentSession
+                  session={sessions[0] || null}
+                  nextTask={next_task}
+                  onStopSession={handleStopSession}
+                  onStopAfterCurrent={handleStopAfterCurrent}
+                  onRefreshSessions={handleRefreshSessions}
+                  isStopping={isStopping}
+                  isStoppingAfterCurrent={isStoppingAfterCurrent}
+                  isRefreshingSessions={isRefreshingSessions}
+                  maxIterations={projectSettings?.max_iterations}
+                  toolCount={toolCount}
+                  assistantMessages={assistantMessages}
+                  isInitialized={is_initialized}
+                  isInitializing={isInitializing}
+                  isStartingCoding={isStartingCoding}
+                />
+              )
             )}
 
             {activeTab === 'history' && (

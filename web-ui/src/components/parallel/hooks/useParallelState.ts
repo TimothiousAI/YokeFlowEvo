@@ -4,6 +4,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 
 // Types
+export interface ToolUse {
+  name: string;
+  id: string;
+  timestamp: Date;
+}
+
 export interface SessionInfo {
   taskId: number;
   sessionId: string;
@@ -11,11 +17,15 @@ export interface SessionInfo {
   epicName: string;
   taskDescription: string;
   worktreeBranch: string;
-  phase: 'planning' | 'executing' | 'verifying' | 'completed';
+  phase: 'planning' | 'executing' | 'verifying' | 'completed' | 'failed';
   progress: { completed: number; total: number };
   duration: number;
   model: string;
   startedAt: Date;
+  // Streaming output tracking
+  toolUses?: ToolUse[];
+  currentTool?: string;
+  error?: string;
 }
 
 export interface BatchState {
@@ -144,15 +154,26 @@ export function useParallelState(options: UseParallelStateOptions) {
       if (status.execution_plan) {
         setExecutionPlan(status.execution_plan);
 
-        // Convert plan batches to BatchState
-        const batchStates: BatchState[] = status.execution_plan.batches.map((b: any, idx: number) => ({
-          batchId: b.batch_id,
-          status: idx < (status.current_batch || 0) ? 'completed' :
-                  idx === (status.current_batch || 0) && status.is_running ? 'running' : 'queued',
-          taskIds: b.task_ids,
-          canParallel: b.can_parallel,
-          dependsOn: b.depends_on || [],
-        }));
+        // Convert plan batches to BatchState, using actual status from database
+        const batchStatuses = status.batch_statuses || {};
+        const batchStates: BatchState[] = status.execution_plan.batches.map((b: any, idx: number) => {
+          // Get actual status from database if available
+          const dbStatus = batchStatuses[b.batch_id] || batchStatuses[idx];
+          const actualStatus = dbStatus?.status || (
+            idx < (status.current_batch || 0) ? 'completed' :
+            idx === (status.current_batch || 0) && status.is_running ? 'running' : 'queued'
+          );
+
+          return {
+            batchId: b.batch_id,
+            status: actualStatus as BatchState['status'],
+            taskIds: b.task_ids,
+            canParallel: b.can_parallel,
+            dependsOn: b.depends_on || [],
+            startedAt: dbStatus?.started_at ? new Date(dbStatus.started_at) : undefined,
+            completedAt: dbStatus?.completed_at ? new Date(dbStatus.completed_at) : undefined,
+          };
+        });
         setBatches(batchStates);
         setCurrentBatchIndex(status.current_batch || 0);
       }
@@ -274,6 +295,7 @@ export function useParallelState(options: UseParallelStateOptions) {
         setCurrentBatchIndex(message.batch_index || 0);
         break;
 
+      case 'agent_start':
       case 'task_start':
         const newSession: SessionInfo = {
           taskId: message.task_id,
@@ -287,9 +309,76 @@ export function useParallelState(options: UseParallelStateOptions) {
           duration: 0,
           model: message.model || 'sonnet',
           startedAt: new Date(),
+          toolUses: [],  // Initialize streaming output
+          currentTool: undefined,
         };
         setRunningSessions(prev => new Map(prev).set(message.task_id, newSession));
         onSessionStart?.(newSession);
+        break;
+
+      case 'agent_complete':
+        setRunningSessions(prev => {
+          const updated = new Map(prev);
+          const session = updated.get(message.task_id);
+          if (session) {
+            updated.set(message.task_id, {
+              ...session,
+              phase: message.success ? 'completed' : 'failed',
+              duration: message.duration || 0,
+              error: message.error,
+            });
+          }
+          return updated;
+        });
+        // Remove from running after short delay to show completion
+        setTimeout(() => {
+          setRunningSessions(prev => {
+            const updated = new Map(prev);
+            updated.delete(message.task_id);
+            return updated;
+          });
+        }, 3000);
+        break;
+
+      case 'tool_use':
+        // Update session with current tool being used
+        if (message.task_id !== undefined) {
+          setRunningSessions(prev => {
+            const updated = new Map(prev);
+            const session = updated.get(message.task_id);
+            if (session) {
+              const toolUses = session.toolUses || [];
+              updated.set(message.task_id, {
+                ...session,
+                phase: 'executing',
+                currentTool: message.tool_name,
+                toolUses: [...toolUses, { name: message.tool_name, id: message.tool_id, timestamp: new Date() }],
+              });
+            }
+            return updated;
+          });
+        }
+        break;
+
+      case 'tool_result':
+        // Tool completed - could update UI to show result
+        if (message.task_id !== undefined) {
+          setRunningSessions(prev => {
+            const updated = new Map(prev);
+            const session = updated.get(message.task_id);
+            if (session) {
+              updated.set(message.task_id, {
+                ...session,
+                currentTool: undefined,  // Clear current tool
+                progress: {
+                  completed: (session.progress?.completed || 0) + 1,
+                  total: session.progress?.total || 10
+                },
+              });
+            }
+            return updated;
+          });
+        }
         break;
 
       case 'task_progress':

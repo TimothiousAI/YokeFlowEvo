@@ -195,34 +195,77 @@ class ExecutionPlanBuilder:
         logger.info(f"Dependency resolution: {len(graph.batches)} batches, "
                    f"{len(graph.circular_deps)} circular deps")
 
-        # Step 2: Analyze file conflicts
+        # Step 2: Assign worktrees FIRST (based on epic boundaries)
+        # This must happen before conflict analysis so we can consider worktree isolation
+        temp_batches = [ExecutionBatch(
+            batch_id=idx,
+            task_ids=list(task_ids),
+            can_parallel=True,
+            depends_on=[idx - 1] if idx > 0 else []
+        ) for idx, task_ids in enumerate(graph.batches)]
+
+        worktree_assignments = await self.assign_worktrees(
+            temp_batches, tasks, epic_map
+        )
+
+        # Step 3: Analyze file conflicts
         conflicts = await self.analyze_file_conflicts(tasks)
         logger.info(f"File conflict analysis: {len(conflicts)} potential conflicts")
 
-        # Step 3: Convert batches and handle conflicts
+        # Step 4: Convert batches and handle conflicts
+        # Split large batches by worktree for parallelism
         execution_batches = []
-        conflicting_task_ids = self._get_conflicting_task_ids(conflicts)
+        batch_counter = 0
 
-        for batch_idx, task_ids in enumerate(graph.batches):
-            # Check if any tasks in this batch conflict with each other
-            batch_conflicts = self._find_batch_conflicts(task_ids, conflicts)
-            can_parallel = len(batch_conflicts) == 0 and len(task_ids) > 1
+        for orig_batch_idx, task_ids in enumerate(graph.batches):
+            # Group tasks by worktree
+            worktree_groups: Dict[str, List[int]] = {}
+            for tid in task_ids:
+                wt = worktree_assignments.get(tid, "worktree-default")
+                if wt not in worktree_groups:
+                    worktree_groups[wt] = []
+                worktree_groups[wt].append(tid)
 
-            # If conflicts exist within batch, mark as sequential
-            if batch_conflicts:
-                logger.warning(f"Batch {batch_idx} has internal conflicts, marking sequential")
+            # If multiple worktrees, split into parallel sub-batches
+            if len(worktree_groups) > 1:
+                logger.info(f"Splitting batch {orig_batch_idx} into {len(worktree_groups)} worktree-parallel sub-batches")
 
-            execution_batches.append(ExecutionBatch(
-                batch_id=batch_idx,
-                task_ids=list(task_ids),
-                can_parallel=can_parallel,
-                depends_on=[batch_idx - 1] if batch_idx > 0 else []
-            ))
+                # Each worktree becomes its own batch that can run in parallel
+                for wt_name, wt_task_ids in worktree_groups.items():
+                    # Check for conflicts within this worktree's tasks
+                    wt_conflicts = self._find_same_worktree_conflicts(
+                        wt_task_ids, conflicts, worktree_assignments
+                    )
+                    # Tasks within same worktree run sequentially (safe), but worktrees run in parallel
+                    can_parallel = True  # This batch can run parallel with other worktree batches
 
-        # Step 4: Assign worktrees
-        worktree_assignments = await self.assign_worktrees(
-            execution_batches, tasks, epic_map
-        )
+                    execution_batches.append(ExecutionBatch(
+                        batch_id=batch_counter,
+                        task_ids=list(wt_task_ids),
+                        can_parallel=can_parallel,
+                        depends_on=[orig_batch_idx - 1] if orig_batch_idx > 0 else []
+                    ))
+                    logger.info(f"  Sub-batch {batch_counter} ({wt_name}): {len(wt_task_ids)} tasks, can_parallel={can_parallel}")
+                    batch_counter += 1
+            else:
+                # Single worktree batch - check for internal conflicts
+                batch_conflicts = self._find_same_worktree_conflicts(
+                    task_ids, conflicts, worktree_assignments
+                )
+                can_parallel = len(batch_conflicts) == 0 and len(task_ids) > 1
+
+                if batch_conflicts:
+                    logger.warning(f"Batch {batch_counter} has {len(batch_conflicts)} same-worktree conflicts, marking sequential")
+                else:
+                    logger.info(f"Batch {batch_counter} has {len(task_ids)} tasks, can run in parallel")
+
+                execution_batches.append(ExecutionBatch(
+                    batch_id=batch_counter,
+                    task_ids=list(task_ids),
+                    can_parallel=can_parallel,
+                    depends_on=[batch_counter - 1] if batch_counter > 0 else []
+                ))
+                batch_counter += 1
 
         # Step 5: Update tasks with predicted files
         await self._update_task_predicted_files(tasks)
@@ -471,6 +514,46 @@ class ExecutionPlanBuilder:
                 batch_conflicts.append(conflict)
 
         return batch_conflicts
+
+    def _find_same_worktree_conflicts(
+        self,
+        task_ids: List[int],
+        conflicts: List[FileConflict],
+        worktree_assignments: Dict[int, str]
+    ) -> List[FileConflict]:
+        """
+        Find conflicts where all involved tasks are in the same batch AND same worktree.
+
+        Tasks in different worktrees can safely have file conflicts because each
+        worktree is isolated (separate git branch/directory).
+
+        Args:
+            task_ids: Task IDs in the batch
+            conflicts: List of all file conflicts
+            worktree_assignments: Mapping of task_id to worktree name
+
+        Returns:
+            List of conflicts that actually matter (same worktree)
+        """
+        task_set = set(task_ids)
+        same_worktree_conflicts = []
+
+        for conflict in conflicts:
+            # Check if all conflicting tasks are in this batch
+            if not set(conflict.task_ids).issubset(task_set):
+                continue
+
+            # Check if conflicting tasks are in the SAME worktree
+            worktrees_involved = set()
+            for tid in conflict.task_ids:
+                wt = worktree_assignments.get(tid, "worktree-default")
+                worktrees_involved.add(wt)
+
+            # Only a real conflict if all tasks are in the same worktree
+            if len(worktrees_involved) == 1:
+                same_worktree_conflicts.append(conflict)
+
+        return same_worktree_conflicts
 
     async def _update_task_predicted_files(self, tasks: List[Dict[str, Any]]) -> None:
         """Update tasks in database with predicted files."""

@@ -30,6 +30,11 @@ interface UseProjectWebSocketOptions {
   // Prompt improvement callbacks
   onPromptImprovementComplete?: (analysisId: string, proposalsCount: number) => void;
   onPromptImprovementFailed?: (analysisId: string, error: string) => void;
+  // Parallel execution callbacks
+  onAgentStart?: (taskId: number, epicId: number, description: string, worktree: string) => void;
+  onAgentComplete?: (taskId: number, success: boolean, duration: number, error?: string) => void;
+  onParallelToolUse?: (taskId: number, toolName: string, toolId: string) => void;
+  onParallelToolResult?: (taskId: number, toolId: string, isError: boolean) => void;
 }
 
 export function useProjectWebSocket(
@@ -56,6 +61,11 @@ export function useProjectWebSocket(
   const onTestUpdatedRef = useRef(options?.onTestUpdated);
   const onPromptImprovementCompleteRef = useRef(options?.onPromptImprovementComplete);
   const onPromptImprovementFailedRef = useRef(options?.onPromptImprovementFailed);
+  // Parallel execution callback refs
+  const onAgentStartRef = useRef(options?.onAgentStart);
+  const onAgentCompleteRef = useRef(options?.onAgentComplete);
+  const onParallelToolUseRef = useRef(options?.onParallelToolUse);
+  const onParallelToolResultRef = useRef(options?.onParallelToolResult);
 
   useEffect(() => {
     onSessionCompleteRef.current = options?.onSessionComplete;
@@ -66,7 +76,12 @@ export function useProjectWebSocket(
     onTestUpdatedRef.current = options?.onTestUpdated;
     onPromptImprovementCompleteRef.current = options?.onPromptImprovementComplete;
     onPromptImprovementFailedRef.current = options?.onPromptImprovementFailed;
-  }, [options?.onSessionComplete, options?.onSessionStarted, options?.onAssistantMessage, options?.onToolUse, options?.onTaskUpdated, options?.onTestUpdated, options?.onPromptImprovementComplete, options?.onPromptImprovementFailed]);
+    // Update parallel refs
+    onAgentStartRef.current = options?.onAgentStart;
+    onAgentCompleteRef.current = options?.onAgentComplete;
+    onParallelToolUseRef.current = options?.onParallelToolUse;
+    onParallelToolResultRef.current = options?.onParallelToolResult;
+  }, [options?.onSessionComplete, options?.onSessionStarted, options?.onAssistantMessage, options?.onToolUse, options?.onTaskUpdated, options?.onTestUpdated, options?.onPromptImprovementComplete, options?.onPromptImprovementFailed, options?.onAgentStart, options?.onAgentComplete, options?.onParallelToolUse, options?.onParallelToolResult]);
 
   const connect = useCallback(() => {
     if (!projectId) return;
@@ -103,18 +118,47 @@ export function useProjectWebSocket(
               if (data.event) {
                 const event = data.event;
 
-                if (event.type === 'tool_use' && event.tool_name) {
-                  // Increment tool count
-                  setToolCount(prev => (prev || 0) + 1);
-
-                  // Optionally trigger callback if provided
-                  if (onToolUseRef.current) {
-                    // We don't have session_number in the event, so pass 0
-                    onToolUseRef.current(event.tool_name, (toolCount || 0) + 1, 0);
+                // Check if this is a parallel agent event (has task_id)
+                const taskId = event.task_id;
+                if (taskId !== undefined) {
+                  // Parallel execution events
+                  if (event.type === 'agent_start') {
+                    console.log(`[WebSocket] Parallel agent started for task ${taskId}`);
+                    if (onAgentStartRef.current) {
+                      onAgentStartRef.current(taskId, event.epic_id || 0, event.task_description || '', event.worktree || '');
+                    }
+                  } else if (event.type === 'agent_complete') {
+                    console.log(`[WebSocket] Parallel agent completed task ${taskId}: success=${event.success}`);
+                    if (onAgentCompleteRef.current) {
+                      onAgentCompleteRef.current(taskId, event.success || false, event.duration || 0, event.error);
+                    }
+                  } else if (event.type === 'tool_use' && event.tool_name) {
+                    // Parallel agent tool use
+                    console.log(`[WebSocket] Parallel task ${taskId} using tool: ${event.tool_name}`);
+                    if (onParallelToolUseRef.current) {
+                      onParallelToolUseRef.current(taskId, event.tool_name, event.tool_id || '');
+                    }
+                  } else if (event.type === 'tool_result') {
+                    console.log(`[WebSocket] Parallel task ${taskId} tool result: ${event.tool_id}`);
+                    if (onParallelToolResultRef.current) {
+                      onParallelToolResultRef.current(taskId, event.tool_id || '', event.is_error || false);
+                    }
                   }
-                } else if (event.type === 'tool_result') {
-                  // Tool result received - could update UI if needed
-                  console.log('[WebSocket] Tool result received:', event.tool_id);
+                } else {
+                  // Sequential execution events (no task_id)
+                  if (event.type === 'tool_use' && event.tool_name) {
+                    // Increment tool count
+                    setToolCount(prev => (prev || 0) + 1);
+
+                    // Optionally trigger callback if provided
+                    if (onToolUseRef.current) {
+                      // We don't have session_number in the event, so pass 0
+                      onToolUseRef.current(event.tool_name, (toolCount || 0) + 1, 0);
+                    }
+                  } else if (event.type === 'tool_result') {
+                    // Tool result received - could update UI if needed
+                    console.log('[WebSocket] Tool result received:', event.tool_id);
+                  }
                 }
               }
               break;

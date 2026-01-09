@@ -2280,15 +2280,21 @@ class TaskDatabase:
         self,
         project_id: UUID,
         batch_number: int,
-        task_ids: List[int]
+        task_ids: List[int],
+        execution_run_id: UUID = None
     ) -> Dict[str, Any]:
         """
-        Create a new parallel batch record.
+        Create a parallel batch record with execution_run_id.
+
+        Each parallel execution run gets a unique execution_run_id, allowing
+        multiple runs without conflicts. The unique constraint is on
+        (project_id, execution_run_id, batch_number).
 
         Args:
             project_id: Project UUID
             batch_number: Sequential batch number
             task_ids: List of task IDs in this batch
+            execution_run_id: Unique ID for this execution run
 
         Returns:
             Created batch record
@@ -2298,16 +2304,40 @@ class TaskDatabase:
                 row = await conn.fetchrow(
                     """
                     INSERT INTO parallel_batches
-                    (project_id, batch_number, task_ids, status)
-                    VALUES ($1, $2, $3, 'pending')
+                    (project_id, batch_number, task_ids, status, execution_run_id)
+                    VALUES ($1, $2, $3, 'pending', $4)
                     RETURNING *
                     """,
-                    project_id, batch_number, task_ids
+                    project_id, batch_number, task_ids, execution_run_id
                 )
-                logger.info(f"Created parallel batch {batch_number} for project {project_id} with {len(task_ids)} tasks")
+                logger.info(f"Created parallel batch {batch_number} for project {project_id} (run: {execution_run_id}) with {len(task_ids)} tasks")
                 return dict(row)
         except Exception as e:
             logger.error(f"Failed to create parallel batch: {e}")
+            raise
+
+    async def delete_parallel_batches(self, project_id: UUID) -> int:
+        """
+        Delete all parallel batches for a project.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            Number of deleted batches
+        """
+        try:
+            async with self.acquire() as conn:
+                result = await conn.execute(
+                    "DELETE FROM parallel_batches WHERE project_id = $1",
+                    project_id
+                )
+                # Extract count from result string like "DELETE 5"
+                count = int(result.split()[-1]) if result else 0
+                logger.info(f"Deleted {count} parallel batch(es) for project {project_id}")
+                return count
+        except Exception as e:
+            logger.error(f"Failed to delete parallel batches: {e}")
             raise
 
     async def get_parallel_batch(self, batch_id: int) -> Optional[Dict[str, Any]]:

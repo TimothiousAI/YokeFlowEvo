@@ -199,11 +199,20 @@ export interface WebSocketMessage {
   proposals_count?: number;  // For prompt_improvement_complete event
   // Real-time progress event data
   event?: {
-    type: 'tool_use' | 'tool_result';
+    type: 'tool_use' | 'tool_result' | 'agent_start' | 'agent_complete';
     tool_name?: string;
     tool_id?: string;
     timestamp?: string;
     is_error?: boolean;
+    // Parallel execution fields
+    task_id?: number;
+    epic_id?: number;
+    task_description?: string;
+    worktree?: string;
+    model?: string;
+    success?: boolean;
+    duration?: number;
+    error?: string;
   };
   project_id?: string;  // For all events
   // Parallel execution event fields

@@ -127,6 +127,7 @@ class ParallelExecutor:
         # Track execution state
         self.execution_start_time: Optional[float] = None
         self.current_batch_number: int = 0
+        self.execution_run_id: Optional[UUID] = None  # Generated at execution start
 
         # Periodic status updates task
         self.status_update_task: Optional[asyncio.Task] = None
@@ -140,7 +141,9 @@ class ParallelExecutor:
         Returns:
             List of ExecutionResult objects for all tasks
         """
-        logger.info("Starting parallel execution")
+        # Generate unique execution run ID for this run
+        self.execution_run_id = uuid4()
+        logger.info(f"Starting parallel execution (run_id: {self.execution_run_id})")
         all_results = []
 
         # Track execution start time
@@ -150,6 +153,18 @@ class ParallelExecutor:
         if self.progress_callback:
             self.status_update_task = asyncio.create_task(self._emit_agent_status_periodically())
             logger.info("Started periodic agent status updates")
+
+        # Create database connection if not provided
+        db_created = False
+        if not self.db:
+            try:
+                from core.database_connection import get_db
+                self.db = await get_db()
+                db_created = True
+                logger.info("Created database connection for parallel execution")
+            except Exception as e:
+                logger.error(f"Failed to create database connection: {e}")
+                return []
 
         try:
             # Load incomplete tasks from database
@@ -178,18 +193,27 @@ class ParallelExecutor:
 
             logger.info(f"Resolved into {len(dependency_graph.batches)} batches")
 
-            # Create batch records in database
+            # Create batch records in database with unique execution_run_id
+            # No need to delete old records - each run has its own unique ID
             for batch_number, task_ids in enumerate(dependency_graph.batches, start=1):
                 await self.db.create_parallel_batch(
                     project_id=self.project_id,
                     batch_number=batch_number,
-                    task_ids=task_ids
+                    task_ids=task_ids,
+                    execution_run_id=self.execution_run_id
                 )
-                logger.info(f"Created batch {batch_number} with {len(task_ids)} tasks")
+                logger.info(f"Created batch {batch_number} with {len(task_ids)} tasks (run: {self.execution_run_id})")
 
             # Initialize worktree manager
             await self.worktree_manager.initialize()
             logger.info("Worktree manager initialized")
+
+            # Recover state from existing worktrees on disk (from failed runs)
+            recovery = await self.worktree_manager.recover_state()
+            if recovery['recovered_count'] > 0:
+                logger.info(f"Recovered {recovery['recovered_count']} existing worktrees")
+            if recovery['cleaned_count'] > 0:
+                logger.info(f"Cleaned {recovery['cleaned_count']} stale worktree entries")
 
             # Process batches sequentially (batch N must complete before batch N+1)
             for batch_number, task_ids in enumerate(dependency_graph.batches, start=1):
@@ -318,43 +342,73 @@ class ParallelExecutor:
                     logger.error(f"Failed to create worktree for epic {epic_id}: {e}")
                     # Continue with other epics
 
-            # Use asyncio.gather() with return_exceptions=True for parallel execution
-            # Create task coroutines and track which task IDs are being executed
-            task_coroutines = []
-            executed_task_ids = []  # Track IDs in same order as coroutines
-            for task_id in task_ids:
-                if task_id not in tasks_by_id:
-                    continue
+            # NEW EXECUTION MODEL: Epics run in parallel, tasks within epic run sequentially
+            # This mimics real development teams: frontend/backend/database teams work in parallel,
+            # but within each team, tasks are sequential (they build on each other)
 
-                task = tasks_by_id[task_id]
-                epic_id = task['epic_id']
+            async def execute_epic_sequentially(epic_id: int, tasks: List[dict]) -> List[ExecutionResult]:
+                """Run all tasks for one epic sequentially in its worktree."""
+                results = []
+                worktree_path = worktree_paths.get(epic_id)
 
-                if epic_id not in worktree_paths:
-                    logger.warning(f"No worktree for task {task_id} (epic {epic_id}), skipping")
-                    continue
+                if not worktree_path:
+                    logger.warning(f"No worktree for epic {epic_id}, skipping all its tasks")
+                    return results
 
-                worktree_path = worktree_paths[epic_id]
-                task_coroutines.append(self._execute_task_with_semaphore(task, worktree_path))
-                executed_task_ids.append(task_id)  # Track in same order as coroutines
+                # Sort by priority within epic (lower priority number = higher priority)
+                sorted_tasks = sorted(tasks, key=lambda t: t.get('priority', 999))
+                logger.info(f"Epic {epic_id}: executing {len(sorted_tasks)} tasks sequentially")
 
-            # Execute all tasks in parallel (respecting semaphore)
-            results = await asyncio.gather(*task_coroutines, return_exceptions=True)
+                for task in sorted_tasks:
+                    # Check for cancellation before each task
+                    if self.cancel_event.is_set():
+                        logger.info(f"Epic {epic_id}: cancellation requested, stopping")
+                        break
 
-            # Process results and handle exceptions
+                    task_id = task.get('id', 0)
+                    logger.info(f"Epic {epic_id}: starting task {task_id}")
+
+                    # Use semaphore for global concurrency limit across all epics
+                    async with self.semaphore:
+                        result = await self.run_task_agent(task, worktree_path)
+                        results.append(result)
+
+                        if not result.success:
+                            logger.warning(
+                                f"Epic {epic_id}: task {task_id} failed, continuing with next task. "
+                                f"Error: {result.error}"
+                            )
+                        else:
+                            logger.info(f"Epic {epic_id}: task {task_id} completed successfully")
+
+                logger.info(f"Epic {epic_id}: completed {len(results)} tasks")
+                return results
+
+            # Run all epics in parallel (each epic runs its tasks sequentially)
+            epic_coroutines = [
+                execute_epic_sequentially(epic_id, tasks)
+                for epic_id, tasks in tasks_by_epic.items()
+            ]
+
+            logger.info(f"Executing {len(epic_coroutines)} epics in parallel")
+            all_results_nested = await asyncio.gather(*epic_coroutines, return_exceptions=True)
+
+            # Flatten results and handle exceptions
             execution_results = []
-            for i, result in enumerate(results):
+            for epic_idx, result in enumerate(all_results_nested):
                 if isinstance(result, Exception):
-                    # Task execution raised an exception - use executed_task_ids for correct mapping
-                    task_id = executed_task_ids[i] if i < len(executed_task_ids) else 0
-                    logger.error(f"Task {task_id} execution failed with exception: {result}")
-                    execution_results.append(ExecutionResult(
-                        task_id=task_id,
-                        success=False,
-                        duration=0.0,
-                        error=str(result)
-                    ))
+                    epic_id = list(tasks_by_epic.keys())[epic_idx]
+                    logger.error(f"Epic {epic_id} execution failed with exception: {result}")
+                    # Add failure results for all tasks in this epic
+                    for task in tasks_by_epic.get(epic_id, []):
+                        execution_results.append(ExecutionResult(
+                            task_id=task.get('id', 0),
+                            success=False,
+                            duration=0.0,
+                            error=f"Epic execution failed: {result}"
+                        ))
                 else:
-                    execution_results.append(result)
+                    execution_results.extend(result)
 
             # Update batch status to completed
             if self.db and batch_record:
@@ -449,9 +503,9 @@ class ParallelExecutor:
                 else:
                     project_uuid = self.project_id
 
-                # Get next session number
-                # For now, use timestamp-based approach
-                session_number = int(time.time())
+                # Get unique session number using execution_run_id and task_id
+                # This ensures no collisions across different execution runs
+                session_number = abs(hash((str(self.execution_run_id), task_id))) % (10**9)
 
                 session = await self.db.create_session(
                     project_id=project_uuid,
@@ -474,6 +528,18 @@ class ParallelExecutor:
             )
             self.running_agents.append(running_agent)
 
+            # Emit agent_start event for UI tracking
+            if self.progress_callback:
+                await self.progress_callback({
+                    "type": "agent_start",
+                    "task_id": task_id,
+                    "epic_id": task.get('epic_id', 0),
+                    "task_description": task.get('description', ''),
+                    "worktree": worktree_path,
+                    "model": model,
+                    "started_at": datetime.fromtimestamp(start_time).isoformat()
+                })
+
             # Execute agent and capture result
             # This will call _execute_agent_session in Task 890
             execution_result = await self._execute_agent_session(
@@ -485,6 +551,18 @@ class ParallelExecutor:
 
             # Remove from running agents
             self.running_agents = [a for a in self.running_agents if a.task_id != task_id]
+
+            # Emit agent_complete event for UI tracking
+            if self.progress_callback:
+                await self.progress_callback({
+                    "type": "agent_complete",
+                    "task_id": task_id,
+                    "epic_id": task.get('epic_id', 0),
+                    "success": execution_result.success,
+                    "duration": execution_result.duration,
+                    "cost": execution_result.cost,
+                    "error": execution_result.error
+                })
 
             # Update task status based on result
             if self.db and execution_result.success:
@@ -807,6 +885,15 @@ Focus on quality over speed. Take time to test thoroughly and write clean, maint
             timeout_seconds = 1800  # 30 minutes per task
 
             try:
+                # Create agent-specific progress callback to forward events with task_id
+                async def agent_progress_callback(event: Dict[str, Any]):
+                    """Forward agent events to main progress callback with task_id."""
+                    if self.progress_callback:
+                        event['task_id'] = task_id
+                        event['epic_id'] = task.get('epic_id', 0)
+                        event['worktree'] = worktree_path
+                        await self.progress_callback(event)
+
                 async with client:
                     status, response_text, session_summary = await asyncio.wait_for(
                         run_agent_session(
@@ -814,7 +901,8 @@ Focus on quality over speed. Take time to test thoroughly and write clean, maint
                             message=prompt,
                             project_dir=worktree_dir,
                             logger=session_logger,
-                            verbose=False  # Quiet mode for parallel execution
+                            verbose=False,  # Quiet mode for parallel execution
+                            progress_callback=agent_progress_callback  # Stream to WebSocket
                         ),
                         timeout=timeout_seconds
                     )

@@ -3922,7 +3922,7 @@ async def build_execution_plan(
                 await db.save_execution_plan(UUID(project_id), plan.to_dict())
 
                 # Broadcast WebSocket update
-                await manager.broadcast(project_id, {
+                await notify_project_update(project_id, {
                     "type": "execution_plan_ready",
                     "data": {
                         "batches": len(plan.batches),
@@ -4040,27 +4040,27 @@ async def start_parallel_execution(
     This is typically called after Session 0 completes.
     """
     try:
-        async with get_db() as db:
-            # Verify project exists
-            project = await db.get_project(project_id)
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        db = await get_db()
+        # Verify project exists
+        project = await db.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
 
-            # Verify project has execution plan
-            plan = await db.get_execution_plan(project_id)
-            if not plan:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No execution plan found. Run initialization first."
-                )
+        # Verify project has execution plan
+        plan = await db.get_execution_plan(project_id)
+        if not plan:
+            raise HTTPException(
+                status_code=400,
+                detail="No execution plan found. Run initialization first."
+            )
 
-            # Check not already running
-            mode = await db.get_project_execution_mode(project_id)
-            if mode == 'parallel_running':
-                raise HTTPException(
-                    status_code=409,
-                    detail="Parallel execution already in progress"
-                )
+        # Check not already running
+        mode = await db.get_project_execution_mode(project_id)
+        if mode == 'parallel_running':
+            raise HTTPException(
+                status_code=409,
+                detail="Parallel execution already in progress"
+            )
 
         # Start in background
         async def run_parallel():
@@ -4089,27 +4089,74 @@ async def start_parallel_execution(
 async def get_parallel_status(project_id: UUID):
     """Get current parallel execution status for a project."""
     try:
-        async with get_db() as db:
-            project = await db.get_project(project_id)
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        db = await get_db()
+        project = await db.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
 
-            metadata = project.get('metadata', {})
-            if isinstance(metadata, str):
-                import json
-                metadata = json.loads(metadata)
+        metadata = project.get('metadata', {})
+        if isinstance(metadata, str):
+            import json
+            metadata = json.loads(metadata)
 
-            plan = await db.get_execution_plan(project_id)
+        plan = await db.get_execution_plan(project_id)
 
-            return {
-                "project_id": str(project_id),
-                "execution_mode": metadata.get('execution_mode', 'sequential'),
-                "parallel_started_at": metadata.get('parallel_started_at'),
-                "parallel_completed_at": metadata.get('parallel_completed_at'),
-                "batches_total": len(plan.get('batches', [])) if plan else 0,
-                "parallel_result": metadata.get('parallel_result'),
-                "parallel_error": metadata.get('parallel_error')
-            }
+        # Determine running state from execution_mode
+        execution_mode = metadata.get('execution_mode', 'sequential')
+        is_running = execution_mode == 'parallel_running'
+        is_paused = execution_mode == 'paused'
+
+        # Get running agents from sessions table
+        running_agents = []
+        if is_running:
+            try:
+                # Query sessions that are currently running for this project
+                sessions = await db.get_sessions(project_id, limit=20)
+                for session in sessions:
+                    if session.get('status') == 'running':
+                        running_agents.append({
+                            'session_id': str(session.get('id', '')),
+                            'session_number': session.get('session_number', 0),
+                            'task_id': session.get('session_number', 0) // 1000,  # Extract task_id from session_number
+                            'model': session.get('model', 'sonnet'),
+                            'started_at': session.get('started_at'),
+                            'duration': 0,  # Would need to calculate from started_at
+                            'phase': 'executing',
+                        })
+            except Exception as e:
+                logger.warning(f"Failed to get running agents: {e}")
+
+        # Get actual batch statuses from database
+        batch_statuses = {}
+        try:
+            batches = await db.list_parallel_batches(project_id)
+            for batch in batches:
+                batch_statuses[batch['batch_number']] = {
+                    'status': batch.get('status', 'queued'),
+                    'started_at': batch.get('started_at'),
+                    'completed_at': batch.get('completed_at'),
+                    'tasks_completed': batch.get('tasks_completed', 0),
+                    'tasks_failed': batch.get('tasks_failed', 0)
+                }
+        except Exception as e:
+            logger.warning(f"Failed to get batch statuses: {e}")
+
+        return {
+            "project_id": str(project_id),
+            "execution_mode": execution_mode,
+            "is_running": is_running,
+            "is_paused": is_paused,
+            "parallel_started_at": metadata.get('parallel_started_at'),
+            "parallel_completed_at": metadata.get('parallel_completed_at'),
+            "batches_total": len(plan.get('batches', [])) if plan else 0,
+            "execution_plan": plan,
+            "current_batch": metadata.get('current_batch', 0),
+            "running_agents": running_agents,
+            "batch_statuses": batch_statuses,  # Actual status from database
+            "total_cost": metadata.get('parallel_cost', 0),
+            "parallel_result": metadata.get('parallel_result'),
+            "parallel_error": metadata.get('parallel_error')
+        }
 
     except HTTPException:
         raise
@@ -4127,24 +4174,24 @@ async def stop_parallel_execution(project_id: UUID):
     Current task will complete before stopping.
     """
     try:
-        async with get_db() as db:
-            project = await db.get_project(project_id)
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        db = await get_db()
+        project = await db.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
 
-            # Check if actually running
-            mode = await db.get_project_execution_mode(project_id)
-            if mode != 'parallel_running':
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Parallel execution not running (current mode: {mode})"
-                )
+        # Check if actually running
+        mode = await db.get_project_execution_mode(project_id)
+        if mode != 'parallel_running':
+            raise HTTPException(
+                status_code=400,
+                detail=f"Parallel execution not running (current mode: {mode})"
+            )
 
-            # Set stop flag
-            await db.update_project_metadata(project_id, {
-                'parallel_stop_requested': True,
-                'parallel_stop_requested_at': datetime.now().isoformat()
-            })
+        # Set stop flag
+        await db.update_project_metadata(project_id, {
+            'parallel_stop_requested': True,
+            'parallel_stop_requested_at': datetime.now().isoformat()
+        })
 
         return {
             "status": "stopping",
@@ -4167,24 +4214,24 @@ async def pause_parallel_execution(project_id: UUID):
     Pauses after current batch completes. Running tasks will finish.
     """
     try:
-        async with get_db() as db:
-            project = await db.get_project(project_id)
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        db = await get_db()
+        project = await db.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
 
-            # Check if actually running
-            mode = await db.get_project_execution_mode(project_id)
-            if mode != 'parallel_running':
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Parallel execution not running (current mode: {mode})"
-                )
+        # Check if actually running
+        mode = await db.get_project_execution_mode(project_id)
+        if mode != 'parallel_running':
+            raise HTTPException(
+                status_code=400,
+                detail=f"Parallel execution not running (current mode: {mode})"
+            )
 
-            # Set paused mode
-            await db.set_project_execution_mode(project_id, 'paused')
-            await db.update_project_metadata(project_id, {
-                'parallel_paused_at': datetime.now().isoformat()
-            })
+        # Set paused mode
+        await db.set_project_execution_mode(project_id, 'paused')
+        await db.update_project_metadata(project_id, {
+            'parallel_paused_at': datetime.now().isoformat()
+        })
 
         return {
             "status": "paused",
@@ -4210,24 +4257,24 @@ async def resume_parallel_execution(
     Continues from where it left off with the next batch.
     """
     try:
-        async with get_db() as db:
-            project = await db.get_project(project_id)
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        db = await get_db()
+        project = await db.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
 
-            # Check if actually paused
-            mode = await db.get_project_execution_mode(project_id)
-            if mode != 'paused':
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Parallel execution not paused (current mode: {mode})"
-                )
+        # Check if actually paused
+        mode = await db.get_project_execution_mode(project_id)
+        if mode != 'paused':
+            raise HTTPException(
+                status_code=400,
+                detail=f"Parallel execution not paused (current mode: {mode})"
+            )
 
-            # Set back to running mode
-            await db.set_project_execution_mode(project_id, 'parallel_running')
-            await db.update_project_metadata(project_id, {
-                'parallel_resumed_at': datetime.now().isoformat()
-            })
+        # Set back to running mode
+        await db.set_project_execution_mode(project_id, 'parallel_running')
+        await db.update_project_metadata(project_id, {
+            'parallel_resumed_at': datetime.now().isoformat()
+        })
 
         # Resume execution in background
         async def resume_execution():
