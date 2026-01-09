@@ -52,6 +52,24 @@ class MockDatabase:
             for eid in epic_ids
         ]
 
+    async def get_epics_with_dependencies(self, project_id):
+        """Return mock epics with dependency info."""
+        if self.epics:
+            return self.epics
+        # Auto-generate epics from task epic_ids with default values
+        epic_ids = set(t.get('epic_id', 1) for t in self.tasks)
+        return [
+            {
+                'id': eid,
+                'name': f'Epic {eid}',
+                'epic_type': 'parallel',
+                'depends_on_epics': [],
+                'domain': None,
+                'priority': eid
+            }
+            for eid in epic_ids
+        ]
+
     async def get_project(self, project_id):
         """Return mock project."""
         return {
@@ -323,6 +341,159 @@ async def test_file_pattern_extraction():
     print(f"[PASS] Extracted patterns: {files_1}")
 
 
+async def test_epic_level_dependencies():
+    """Test epic-level dependency handling with parallel and sequential epics."""
+    print("\n=== Test: Epic-Level Dependencies ===")
+
+    mock_db = MockDatabase()
+
+    # Set up epics: 2 parallel epics and 2 sequential epics
+    mock_db.set_epics([
+        {
+            'id': 1,
+            'name': 'Database Layer',
+            'epic_type': 'parallel',
+            'depends_on_epics': [],
+            'domain': 'database',
+            'priority': 1
+        },
+        {
+            'id': 2,
+            'name': 'Backend API Layer',
+            'epic_type': 'parallel',
+            'depends_on_epics': [],
+            'domain': 'backend',
+            'priority': 2
+        },
+        {
+            'id': 3,
+            'name': 'Integration Layer',
+            'epic_type': 'sequential',
+            'depends_on_epics': [1, 2],  # Depends on both parallel epics
+            'domain': 'integration',
+            'priority': 3
+        },
+        {
+            'id': 4,
+            'name': 'Polish',
+            'epic_type': 'sequential',
+            'depends_on_epics': [3],  # Depends on integration
+            'domain': 'polish',
+            'priority': 4
+        }
+    ])
+
+    # Set up tasks for each epic
+    mock_db.set_tasks([
+        # Database Layer (Epic 1)
+        {'id': 1, 'epic_id': 1, 'priority': 1, 'description': 'Create schema', 'depends_on': []},
+        {'id': 2, 'epic_id': 1, 'priority': 2, 'description': 'Create models', 'depends_on': []},
+
+        # Backend API Layer (Epic 2)
+        {'id': 3, 'epic_id': 2, 'priority': 1, 'description': 'Create endpoints', 'depends_on': []},
+        {'id': 4, 'epic_id': 2, 'priority': 2, 'description': 'Add middleware', 'depends_on': []},
+
+        # Integration Layer (Epic 3)
+        {'id': 5, 'epic_id': 3, 'priority': 1, 'description': 'Wire API to DB', 'depends_on': []},
+        {'id': 6, 'epic_id': 3, 'priority': 2, 'description': 'E2E tests', 'depends_on': []},
+
+        # Polish (Epic 4)
+        {'id': 7, 'epic_id': 4, 'priority': 1, 'description': 'Optimize performance', 'depends_on': []},
+        {'id': 8, 'epic_id': 4, 'priority': 2, 'description': 'Fix edge cases', 'depends_on': []},
+    ])
+
+    builder = ExecutionPlanBuilder(mock_db, max_worktrees=4)
+    plan = await builder.build_plan(uuid4())
+
+    # Verify metadata
+    assert plan.metadata['parallel_epics'] == 2, "Should have 2 parallel epics"
+    assert plan.metadata['sequential_epics'] == 2, "Should have 2 sequential epics"
+    assert plan.metadata['planning_mode'] == 'epic_based', "Should use epic-based planning"
+
+    # Verify parallel epics are in early batches
+    # Tasks from epics 1 and 2 should be in the first batch(es)
+    first_batch_task_ids = []
+    for batch in plan.batches[:plan.metadata.get('parallel_batch_count', 1)]:
+        first_batch_task_ids.extend(batch.task_ids)
+
+    # All tasks from parallel epics (1-4) should be in parallel batches
+    parallel_tasks = {1, 2, 3, 4}
+    assert parallel_tasks.issubset(set(first_batch_task_ids)), \
+        f"Parallel epic tasks should be in first batches. Got: {first_batch_task_ids}"
+
+    # Verify sequential epics are in later batches
+    sequential_batch_task_ids = []
+    for batch in plan.batches[plan.metadata.get('parallel_batch_count', 1):]:
+        sequential_batch_task_ids.extend(batch.task_ids)
+
+    # All tasks from sequential epics (5-8) should be in sequential batches
+    sequential_tasks = {5, 6, 7, 8}
+    assert sequential_tasks.issubset(set(sequential_batch_task_ids)), \
+        f"Sequential epic tasks should be in later batches. Got: {sequential_batch_task_ids}"
+
+    print(f"[PASS] Epic-level dependencies: {len(plan.batches)} batches, "
+          f"{plan.metadata['parallel_batch_count']} parallel")
+
+
+async def test_topological_sort_epics():
+    """Test topological sorting of sequential epics with dependencies."""
+    print("\n=== Test: Topological Sort of Sequential Epics ===")
+
+    mock_db = MockDatabase()
+    builder = ExecutionPlanBuilder(mock_db)
+
+    # Create epics with complex dependencies
+    epics = [
+        {'id': 5, 'name': 'Epic 5', 'depends_on_epics': [3], 'priority': 5},
+        {'id': 3, 'name': 'Epic 3', 'depends_on_epics': [1], 'priority': 3},
+        {'id': 1, 'name': 'Epic 1', 'depends_on_epics': [], 'priority': 1},
+        {'id': 4, 'name': 'Epic 4', 'depends_on_epics': [1, 2], 'priority': 4},
+        {'id': 2, 'name': 'Epic 2', 'depends_on_epics': [], 'priority': 2},
+    ]
+
+    # Sort epics
+    sorted_epics = builder._topological_sort_epics(epics)
+
+    # Verify order: dependencies come before dependents
+    epic_positions = {e['id']: i for i, e in enumerate(sorted_epics)}
+
+    # Epic 1 should come before 3
+    assert epic_positions[1] < epic_positions[3], "Epic 1 should come before Epic 3"
+
+    # Epic 3 should come before 5
+    assert epic_positions[3] < epic_positions[5], "Epic 3 should come before Epic 5"
+
+    # Epic 1 and 2 should come before 4
+    assert epic_positions[1] < epic_positions[4], "Epic 1 should come before Epic 4"
+    assert epic_positions[2] < epic_positions[4], "Epic 2 should come before Epic 4"
+
+    print(f"[PASS] Topologically sorted {len(sorted_epics)} epics: "
+          f"{[e['id'] for e in sorted_epics]}")
+
+
+async def test_circular_dependency_detection():
+    """Test that circular dependencies raise an exception."""
+    print("\n=== Test: Circular Dependency Detection ===")
+
+    mock_db = MockDatabase()
+    builder = ExecutionPlanBuilder(mock_db)
+
+    # Create epics with circular dependencies: A -> B -> C -> A
+    epics = [
+        {'id': 1, 'name': 'Epic A', 'depends_on_epics': [3], 'priority': 1},
+        {'id': 2, 'name': 'Epic B', 'depends_on_epics': [1], 'priority': 2},
+        {'id': 3, 'name': 'Epic C', 'depends_on_epics': [2], 'priority': 3},
+    ]
+
+    # Sorting should raise ValueError for circular dependencies
+    try:
+        builder._topological_sort_epics(epics)
+        assert False, "Should have raised ValueError for circular dependencies"
+    except ValueError as e:
+        assert "Circular dependency" in str(e), f"Error should mention circular dependency: {e}"
+        print(f"[PASS] Caught expected error: {e}")
+
+
 async def run_all_tests():
     """Run all tests."""
     print("=" * 60)
@@ -338,6 +509,9 @@ async def run_all_tests():
     await test_plan_serialization()
     await test_database_methods()
     await test_file_pattern_extraction()
+    await test_epic_level_dependencies()
+    await test_topological_sort_epics()
+    await test_circular_dependency_detection()
 
     print("\n" + "=" * 60)
     print("ALL TESTS PASSED")

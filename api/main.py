@@ -910,7 +910,15 @@ async def get_test_coverage(project_id: str):
 
 @app.get("/api/projects/{project_id}/epics")
 async def get_project_epics(project_id: str):
-    """Get all epics for a project."""
+    """
+    Get all epics for a project.
+
+    Returns epic metadata including:
+    - epic_type: 'parallel' or 'sequential'
+    - domain: Layer domain (database/backend/frontend/agents/integration/polish)
+    - depends_on_epics: List of epic IDs this epic depends on
+    - Standard epic fields (name, description, status, priority)
+    """
     try:
         project_uuid = UUID(project_id)
         async with DatabaseManager() as db:
@@ -958,7 +966,15 @@ async def get_task_detail(project_id: str, task_id: int):
 
 @app.get("/api/projects/{project_id}/epics/{epic_id}")
 async def get_epic_detail(project_id: str, epic_id: int):
-    """Get detailed epic information including all tasks."""
+    """
+    Get detailed epic information including all tasks.
+
+    Returns epic with:
+    - epic_type: 'parallel' or 'sequential'
+    - domain: Layer domain (database/backend/frontend/agents/integration/polish)
+    - depends_on_epics: List of epic IDs this epic depends on
+    - tasks: List of all tasks in the epic with their test counts
+    """
     try:
         logger.info(f"Getting epic detail for project={project_id}, epic_id={epic_id}")
         project_uuid = UUID(project_id)
@@ -3787,6 +3803,7 @@ async def get_execution_plan(
     - Parallel batches
     - Worktree assignments
     - Predicted file conflicts
+    - Epic metadata (epic_type, domain, depends_on_epics)
     """
     try:
         plan = await db.get_execution_plan(UUID(project_id))
@@ -3795,6 +3812,25 @@ async def get_execution_plan(
                 status_code=404,
                 detail="No execution plan found. Run initialization first."
             )
+
+        # Enrich plan with epic metadata for UI visualization
+        project_uuid = UUID(project_id)
+        epics = await db.get_epics_with_dependencies(project_uuid)
+
+        # Add epic metadata to response
+        plan["epics"] = [
+            {
+                "id": epic["id"],
+                "name": epic["name"],
+                "epic_type": epic.get("epic_type", "parallel"),
+                "domain": epic.get("domain"),
+                "depends_on_epics": epic.get("depends_on_epics", []),
+                "status": epic.get("status"),
+                "priority": epic.get("priority")
+            }
+            for epic in epics
+        ]
+
         return plan
 
     except HTTPException:
@@ -3821,13 +3857,25 @@ async def build_execution_plan(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        # Build plan in background
+        # Build plan in background with progress streaming
         async def build_plan_task():
             from core.execution_plan import ExecutionPlanBuilder
 
             try:
+                # Create progress callback for WebSocket streaming
+                async def progress_callback(step: str, detail: str, progress: float):
+                    """Stream progress updates via WebSocket."""
+                    await notify_project_update(project_id, {
+                        "type": "execution_plan_progress",
+                        "data": {
+                            "step": step,
+                            "detail": detail,
+                            "progress": progress
+                        }
+                    })
+
                 builder = ExecutionPlanBuilder(db)
-                plan = await builder.build_plan(UUID(project_id))
+                plan = await builder.build_plan(UUID(project_id), progress_callback=progress_callback)
                 await db.save_execution_plan(UUID(project_id), plan.to_dict())
 
                 # Broadcast WebSocket update
@@ -3842,6 +3890,11 @@ async def build_execution_plan(
                 logger.info(f"Execution plan built for project {project_id}")
             except Exception as e:
                 logger.error(f"Error building execution plan: {e}")
+                # Send error via WebSocket
+                await notify_project_update(project_id, {
+                    "type": "execution_plan_error",
+                    "data": {"error": str(e)}
+                })
 
         background_tasks.add_task(build_plan_task)
 
@@ -3909,7 +3962,11 @@ async def get_execution_plan_summary(
     project_id: str,
     db=Depends(get_db)
 ) -> Dict:
-    """Get a summary of the execution plan."""
+    """
+    Get a summary of the execution plan.
+
+    Includes epic breakdown (parallel vs sequential) and batch statistics.
+    """
     try:
         plan = await db.get_execution_plan(UUID(project_id))
         if not plan:
@@ -3918,6 +3975,12 @@ async def get_execution_plan_summary(
                 "message": "No execution plan found"
             }
 
+        # Get epic metadata for summary
+        project_uuid = UUID(project_id)
+        epics = await db.get_epics_with_dependencies(project_uuid)
+        parallel_epic_count = sum(1 for e in epics if e.get("epic_type", "parallel") == "parallel")
+        sequential_epic_count = sum(1 for e in epics if e.get("epic_type") == "sequential")
+
         return {
             "has_plan": True,
             "created_at": plan.get("created_at"),
@@ -3925,7 +3988,10 @@ async def get_execution_plan_summary(
             "total_tasks": sum(len(b.get("task_ids", [])) for b in plan.get("batches", [])),
             "parallel_batches": sum(1 for b in plan.get("batches", []) if b.get("can_parallel")),
             "conflicts_detected": len(plan.get("predicted_conflicts", [])),
-            "worktrees_used": len(set(plan.get("worktree_assignments", {}).values()))
+            "worktrees_used": len(set(plan.get("worktree_assignments", {}).values())),
+            "total_epics": len(epics),
+            "parallel_epics": parallel_epic_count,
+            "sequential_epics": sequential_epic_count
         }
 
     except Exception as e:

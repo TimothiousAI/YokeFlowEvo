@@ -160,19 +160,35 @@ class ExecutionPlanBuilder:
         self.resolver = DependencyResolver()
         logger.info(f"ExecutionPlanBuilder initialized (max_worktrees={max_worktrees})")
 
-    async def build_plan(self, project_id: UUID) -> ExecutionPlan:
+    async def build_plan(
+        self,
+        project_id: UUID,
+        progress_callback: Optional[callable] = None
+    ) -> ExecutionPlan:
         """
         Build complete execution plan for a project.
 
         Args:
             project_id: UUID of the project
+            progress_callback: Optional async callback for progress updates.
+                               Called with (step: str, detail: str, progress: float)
 
         Returns:
             ExecutionPlan with batches, worktree assignments, and conflict analysis
         """
+        async def emit_progress(step: str, detail: str, progress: float):
+            """Emit progress update if callback provided."""
+            if progress_callback:
+                try:
+                    await progress_callback(step, detail, progress)
+                except Exception as e:
+                    logger.warning(f"Progress callback failed: {e}")
+
         logger.info(f"Building execution plan for project {project_id}")
+        await emit_progress("starting", "Initializing plan builder...", 0.0)
 
         # Get all tasks with their dependencies
+        await emit_progress("loading_tasks", "Loading tasks from database...", 0.1)
         tasks = await self.db.get_tasks_for_planning(project_id)
 
         if not tasks:
@@ -186,91 +202,188 @@ class ExecutionPlanBuilder:
                 metadata={"reason": "no_tasks"}
             )
 
-        # Get epics for worktree assignment
-        epics = await self.db.list_epics(project_id)
+        # Get epics with dependency information for epic-level planning
+        await emit_progress("loading_epics", f"Loading epics ({len(tasks)} tasks found)...", 0.2)
+        epics = await self.db.get_epics_with_dependencies(project_id)
         epic_map = {e["id"]: e for e in epics}
 
-        # Step 1: Resolve dependencies to get batches
-        graph = self.resolver.resolve(tasks)
-        logger.info(f"Dependency resolution: {len(graph.batches)} batches, "
-                   f"{len(graph.circular_deps)} circular deps")
+        # Separate parallel and sequential epics
+        parallel_epics = [e for e in epics if e.get('epic_type', 'parallel') == 'parallel']
+        sequential_epics = [e for e in epics if e.get('epic_type') == 'sequential']
+
+        logger.info(f"Epic composition: {len(parallel_epics)} parallel, {len(sequential_epics)} sequential")
+
+        # Determine if we should use epic-based or task-based planning
+        # Use epic-based planning only if at least one epic has epic_type explicitly set
+        has_epic_types = any(e.get('epic_type') is not None for e in epics)
+        use_epic_planning = has_epic_types and (len(sequential_epics) > 0 or len(parallel_epics) > 1)
+
+        if not use_epic_planning:
+            # Fall back to task-level dependency resolution (backward compatibility)
+            logger.info("Using task-level dependency planning (no epic types defined)")
+            await emit_progress("resolving_deps", f"Resolving task dependencies...", 0.3)
+            return await self._build_plan_task_based(
+                project_id, tasks, epics, epic_map, conflicts=None,
+                emit_progress=emit_progress
+            )
+
+        # Step 1: Sort sequential epics by dependencies (topological order)
+        await emit_progress("resolving_deps", f"Resolving epic dependencies...", 0.3)
+        sorted_sequential_epics = self._topological_sort_epics(sequential_epics)
+        logger.info(f"Epic-level planning: {len(parallel_epics)} parallel epics, "
+                   f"{len(sorted_sequential_epics)} sequential epics")
 
         # Step 2: Assign worktrees FIRST (based on epic boundaries)
         # This must happen before conflict analysis so we can consider worktree isolation
+        await emit_progress("assigning_worktrees", f"Assigning worktrees for {len(epics)} epics...", 0.4)
+        # Create temporary batch structure for worktree assignment
         temp_batches = [ExecutionBatch(
-            batch_id=idx,
-            task_ids=list(task_ids),
+            batch_id=0,
+            task_ids=[t["id"] for t in tasks],
             can_parallel=True,
-            depends_on=[idx - 1] if idx > 0 else []
-        ) for idx, task_ids in enumerate(graph.batches)]
+            depends_on=[]
+        )]
 
         worktree_assignments = await self.assign_worktrees(
             temp_batches, tasks, epic_map
         )
 
         # Step 3: Analyze file conflicts
+        await emit_progress("analyzing_conflicts", "Analyzing potential file conflicts...", 0.5)
         conflicts = await self.analyze_file_conflicts(tasks)
         logger.info(f"File conflict analysis: {len(conflicts)} potential conflicts")
 
-        # Step 4: Convert batches and handle conflicts
-        # Split large batches by worktree for parallelism
+        # Step 4: Create batches based on epic-level dependencies
+        await emit_progress("creating_batches", f"Creating execution batches ({len(conflicts)} conflicts detected)...", 0.6)
         execution_batches = []
         batch_counter = 0
 
-        for orig_batch_idx, task_ids in enumerate(graph.batches):
-            # Group tasks by worktree
+        # Create a map of epic_id -> task_ids
+        epic_to_tasks: Dict[int, List[int]] = {}
+        for task in tasks:
+            epic_id = task.get("epic_id")
+            if epic_id:
+                if epic_id not in epic_to_tasks:
+                    epic_to_tasks[epic_id] = []
+                epic_to_tasks[epic_id].append(task["id"])
+
+        # Batch 0: All tasks from all parallel epics run together
+        if parallel_epics:
+            parallel_task_ids = []
+            for epic in parallel_epics:
+                epic_id = epic["id"]
+                if epic_id in epic_to_tasks:
+                    parallel_task_ids.extend(epic_to_tasks[epic_id])
+
+            if parallel_task_ids:
+                logger.info(f"Batch 0 (parallel epics): {len(parallel_task_ids)} tasks from {len(parallel_epics)} epics")
+
+                # Group tasks by worktree within the parallel batch
+                worktree_groups: Dict[str, List[int]] = {}
+                for tid in parallel_task_ids:
+                    wt = worktree_assignments.get(tid, "worktree-default")
+                    if wt not in worktree_groups:
+                        worktree_groups[wt] = []
+                    worktree_groups[wt].append(tid)
+
+                # If multiple worktrees, split into parallel sub-batches
+                if len(worktree_groups) > 1:
+                    logger.info(f"  Splitting into {len(worktree_groups)} worktree sub-batches")
+
+                    for wt_name, wt_task_ids in worktree_groups.items():
+                        # Tasks within same worktree, can run in parallel with other worktrees
+                        execution_batches.append(ExecutionBatch(
+                            batch_id=batch_counter,
+                            task_ids=list(wt_task_ids),
+                            can_parallel=True,
+                            depends_on=[]
+                        ))
+                        logger.info(f"    Sub-batch {batch_counter} ({wt_name}): {len(wt_task_ids)} tasks")
+                        batch_counter += 1
+                else:
+                    # All tasks in one worktree - check for conflicts
+                    batch_conflicts = self._find_same_worktree_conflicts(
+                        parallel_task_ids, conflicts, worktree_assignments
+                    )
+                    can_parallel = len(batch_conflicts) == 0 and len(parallel_task_ids) > 1
+
+                    execution_batches.append(ExecutionBatch(
+                        batch_id=batch_counter,
+                        task_ids=parallel_task_ids,
+                        can_parallel=can_parallel,
+                        depends_on=[]
+                    ))
+                    logger.info(f"  Single batch {batch_counter}: {len(parallel_task_ids)} tasks, can_parallel={can_parallel}")
+                    batch_counter += 1
+
+        # Subsequent batches: One batch per sequential epic, in dependency order
+        parallel_batch_count = batch_counter
+        for seq_idx, epic in enumerate(sorted_sequential_epics):
+            epic_id = epic["id"]
+            epic_name = epic.get("name", f"Epic {epic_id}")
+            epic_task_ids = epic_to_tasks.get(epic_id, [])
+
+            if not epic_task_ids:
+                logger.info(f"Sequential epic '{epic_name}' has no tasks, skipping")
+                continue
+
+            logger.info(f"Batch {batch_counter} (sequential epic '{epic_name}'): {len(epic_task_ids)} tasks")
+
+            # Sequential epics depend on all parallel epics completing
+            depends_on = list(range(parallel_batch_count)) if parallel_batch_count > 0 else []
+
+            # Also depend on previous sequential batches based on depends_on_epics
+            depends_on_epics = epic.get("depends_on_epics") or []
+            for dep_epic_id in depends_on_epics:
+                # Find the batch that contains this epic's tasks
+                for batch in execution_batches[parallel_batch_count:]:
+                    # Check if this batch contains tasks from the dependency epic
+                    batch_epic_ids = set()
+                    for tid in batch.task_ids:
+                        for t in tasks:
+                            if t["id"] == tid:
+                                batch_epic_ids.add(t.get("epic_id"))
+                                break
+                    if dep_epic_id in batch_epic_ids:
+                        if batch.batch_id not in depends_on:
+                            depends_on.append(batch.batch_id)
+
+            # Group by worktree if needed
             worktree_groups: Dict[str, List[int]] = {}
-            for tid in task_ids:
+            for tid in epic_task_ids:
                 wt = worktree_assignments.get(tid, "worktree-default")
                 if wt not in worktree_groups:
                     worktree_groups[wt] = []
                 worktree_groups[wt].append(tid)
 
-            # If multiple worktrees, split into parallel sub-batches
             if len(worktree_groups) > 1:
-                logger.info(f"Splitting batch {orig_batch_idx} into {len(worktree_groups)} worktree-parallel sub-batches")
+                logger.info(f"  Splitting into {len(worktree_groups)} worktree sub-batches")
 
-                # Each worktree becomes its own batch that can run in parallel
                 for wt_name, wt_task_ids in worktree_groups.items():
-                    # Check for conflicts within this worktree's tasks
-                    wt_conflicts = self._find_same_worktree_conflicts(
-                        wt_task_ids, conflicts, worktree_assignments
-                    )
-                    # Tasks within same worktree run sequentially (safe), but worktrees run in parallel
-                    can_parallel = True  # This batch can run parallel with other worktree batches
-
                     execution_batches.append(ExecutionBatch(
                         batch_id=batch_counter,
                         task_ids=list(wt_task_ids),
-                        can_parallel=can_parallel,
-                        depends_on=[orig_batch_idx - 1] if orig_batch_idx > 0 else []
+                        can_parallel=False,  # Sequential epic
+                        depends_on=depends_on
                     ))
-                    logger.info(f"  Sub-batch {batch_counter} ({wt_name}): {len(wt_task_ids)} tasks, can_parallel={can_parallel}")
+                    logger.info(f"    Sub-batch {batch_counter} ({wt_name}): {len(wt_task_ids)} tasks")
                     batch_counter += 1
             else:
-                # Single worktree batch - check for internal conflicts
-                batch_conflicts = self._find_same_worktree_conflicts(
-                    task_ids, conflicts, worktree_assignments
-                )
-                can_parallel = len(batch_conflicts) == 0 and len(task_ids) > 1
-
-                if batch_conflicts:
-                    logger.warning(f"Batch {batch_counter} has {len(batch_conflicts)} same-worktree conflicts, marking sequential")
-                else:
-                    logger.info(f"Batch {batch_counter} has {len(task_ids)} tasks, can run in parallel")
-
                 execution_batches.append(ExecutionBatch(
                     batch_id=batch_counter,
-                    task_ids=list(task_ids),
-                    can_parallel=can_parallel,
-                    depends_on=[batch_counter - 1] if batch_counter > 0 else []
+                    task_ids=epic_task_ids,
+                    can_parallel=False,  # Sequential epic
+                    depends_on=depends_on
                 ))
+                logger.info(f"  Single batch {batch_counter}: {len(epic_task_ids)} tasks")
                 batch_counter += 1
 
         # Step 5: Update tasks with predicted files
+        await emit_progress("predicting_files", "Predicting file modifications...", 0.8)
         await self._update_task_predicted_files(tasks)
 
         # Build final plan
+        await emit_progress("finalizing", f"Finalizing plan ({len(execution_batches)} batches)...", 0.9)
         plan = ExecutionPlan(
             project_id=project_id,
             created_at=datetime.utcnow(),
@@ -279,17 +392,21 @@ class ExecutionPlanBuilder:
             predicted_conflicts=conflicts,
             metadata={
                 "total_tasks": len(tasks),
+                "total_epics": len(epics),
+                "parallel_epics": len(parallel_epics),
+                "sequential_epics": len(sequential_epics),
                 "total_batches": len(execution_batches),
+                "parallel_batch_count": parallel_batch_count,
                 "parallel_possible": sum(1 for b in execution_batches if b.can_parallel),
                 "conflicts_detected": len(conflicts),
-                "circular_dependencies": len(graph.circular_deps),
-                "missing_dependencies": len(graph.missing_deps)
+                "planning_mode": "epic_based"
             }
         )
 
         logger.info(f"Execution plan built: {plan.total_tasks} tasks in "
                    f"{len(plan.batches)} batches, {plan.parallel_batches} parallel")
 
+        await emit_progress("complete", f"Plan complete: {plan.total_tasks} tasks in {len(plan.batches)} batches", 1.0)
         return plan
 
     async def analyze_file_conflicts(self, tasks: List[Dict[str, Any]]) -> List[FileConflict]:
@@ -498,6 +615,174 @@ class ExecutionPlanBuilder:
         for conflict in conflicts:
             result.update(conflict.task_ids)
         return result
+
+    async def _build_plan_task_based(
+        self,
+        project_id: UUID,
+        tasks: List[Dict[str, Any]],
+        epics: List[Dict[str, Any]],
+        epic_map: Dict[int, Dict[str, Any]],
+        conflicts: Optional[List[FileConflict]],
+        emit_progress: callable
+    ) -> ExecutionPlan:
+        """
+        Build execution plan using task-level dependency resolution (legacy mode).
+
+        This is the original implementation that respects task dependencies.
+        Used when epic-level types are not defined.
+        """
+        # Resolve task dependencies to get batches
+        graph = self.resolver.resolve(tasks)
+        logger.info(f"Task-level dependency resolution: {len(graph.batches)} batches, "
+                   f"{len(graph.circular_deps)} circular deps")
+
+        # Assign worktrees
+        await emit_progress("assigning_worktrees", f"Assigning worktrees for {len(epics)} epics...", 0.4)
+        temp_batches = [ExecutionBatch(
+            batch_id=idx,
+            task_ids=list(task_ids),
+            can_parallel=True,
+            depends_on=[idx - 1] if idx > 0 else []
+        ) for idx, task_ids in enumerate(graph.batches)]
+
+        worktree_assignments = await self.assign_worktrees(
+            temp_batches, tasks, epic_map
+        )
+
+        # Analyze file conflicts
+        await emit_progress("analyzing_conflicts", "Analyzing potential file conflicts...", 0.5)
+        if conflicts is None:
+            conflicts = await self.analyze_file_conflicts(tasks)
+        logger.info(f"File conflict analysis: {len(conflicts)} potential conflicts")
+
+        # Convert batches and handle conflicts
+        await emit_progress("creating_batches", f"Creating execution batches ({len(conflicts)} conflicts detected)...", 0.6)
+        execution_batches = []
+        batch_counter = 0
+
+        for orig_batch_idx, task_ids in enumerate(graph.batches):
+            # Group tasks by worktree
+            worktree_groups: Dict[str, List[int]] = {}
+            for tid in task_ids:
+                wt = worktree_assignments.get(tid, "worktree-default")
+                if wt not in worktree_groups:
+                    worktree_groups[wt] = []
+                worktree_groups[wt].append(tid)
+
+            # If multiple worktrees, split into parallel sub-batches
+            if len(worktree_groups) > 1:
+                logger.info(f"Splitting batch {orig_batch_idx} into {len(worktree_groups)} worktree-parallel sub-batches")
+
+                for wt_name, wt_task_ids in worktree_groups.items():
+                    wt_conflicts = self._find_same_worktree_conflicts(
+                        wt_task_ids, conflicts, worktree_assignments
+                    )
+                    can_parallel = True
+
+                    execution_batches.append(ExecutionBatch(
+                        batch_id=batch_counter,
+                        task_ids=list(wt_task_ids),
+                        can_parallel=can_parallel,
+                        depends_on=[orig_batch_idx - 1] if orig_batch_idx > 0 else []
+                    ))
+                    logger.info(f"  Sub-batch {batch_counter} ({wt_name}): {len(wt_task_ids)} tasks")
+                    batch_counter += 1
+            else:
+                # Single worktree batch
+                batch_conflicts = self._find_same_worktree_conflicts(
+                    task_ids, conflicts, worktree_assignments
+                )
+                can_parallel = len(batch_conflicts) == 0 and len(task_ids) > 1
+
+                execution_batches.append(ExecutionBatch(
+                    batch_id=batch_counter,
+                    task_ids=list(task_ids),
+                    can_parallel=can_parallel,
+                    depends_on=[batch_counter - 1] if batch_counter > 0 else []
+                ))
+                batch_counter += 1
+
+        # Update tasks with predicted files
+        await emit_progress("predicting_files", "Predicting file modifications...", 0.8)
+        await self._update_task_predicted_files(tasks)
+
+        # Build final plan
+        await emit_progress("finalizing", f"Finalizing plan ({len(execution_batches)} batches)...", 0.9)
+        plan = ExecutionPlan(
+            project_id=project_id,
+            created_at=datetime.utcnow(),
+            batches=execution_batches,
+            worktree_assignments=worktree_assignments,
+            predicted_conflicts=conflicts,
+            metadata={
+                "total_tasks": len(tasks),
+                "total_batches": len(execution_batches),
+                "parallel_possible": sum(1 for b in execution_batches if b.can_parallel),
+                "conflicts_detected": len(conflicts),
+                "circular_dependencies": len(graph.circular_deps),
+                "missing_dependencies": len(graph.missing_deps),
+                "planning_mode": "task_based"
+            }
+        )
+
+        logger.info(f"Execution plan built: {plan.total_tasks} tasks in "
+                   f"{len(plan.batches)} batches, {plan.parallel_batches} parallel")
+
+        await emit_progress("complete", f"Plan complete: {plan.total_tasks} tasks in {len(plan.batches)} batches", 1.0)
+        return plan
+
+    def _topological_sort_epics(self, epics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Sort sequential epics in topological order based on depends_on_epics.
+
+        Args:
+            epics: List of sequential epic records
+
+        Returns:
+            List of epics sorted so dependencies come before dependents
+        """
+        if not epics:
+            return []
+
+        # Build dependency graph
+        epic_map = {e["id"]: e for e in epics}
+        in_degree = {e["id"]: 0 for e in epics}
+        adj_list = {e["id"]: [] for e in epics}
+
+        for epic in epics:
+            depends_on = epic.get("depends_on_epics") or []
+            for dep_id in depends_on:
+                if dep_id in epic_map:
+                    # dep_id -> epic["id"] edge
+                    adj_list[dep_id].append(epic["id"])
+                    in_degree[epic["id"]] += 1
+
+        # Kahn's algorithm for topological sort
+        queue = [eid for eid in in_degree if in_degree[eid] == 0]
+        sorted_epic_ids = []
+
+        while queue:
+            # Sort by priority to maintain deterministic ordering
+            queue.sort(key=lambda eid: epic_map[eid].get("priority", 999))
+            current_id = queue.pop(0)
+            sorted_epic_ids.append(current_id)
+
+            for neighbor_id in adj_list[current_id]:
+                in_degree[neighbor_id] -= 1
+                if in_degree[neighbor_id] == 0:
+                    queue.append(neighbor_id)
+
+        # Check for circular dependencies - raise exception instead of silently continuing
+        if len(sorted_epic_ids) != len(epics):
+            remaining = [e for e in epics if e["id"] not in sorted_epic_ids]
+            cycle_names = [e.get("name", f"Epic {e['id']}") for e in remaining]
+            raise ValueError(
+                f"Circular dependency detected in sequential epics: {', '.join(cycle_names)}. "
+                f"Check depends_on_epics configuration."
+            )
+
+        # Return epics in sorted order
+        return [epic_map[eid] for eid in sorted_epic_ids]
 
     def _find_batch_conflicts(
         self,

@@ -189,6 +189,11 @@ CREATE TABLE epics (
     priority INTEGER DEFAULT 0,
     status task_status DEFAULT 'pending',
 
+    -- Parallel execution control
+    epic_type VARCHAR(20) DEFAULT 'parallel' CHECK (epic_type IN ('parallel', 'sequential')),
+    depends_on_epics INTEGER[] DEFAULT '{}',  -- Array of epic IDs this epic depends on
+    domain VARCHAR(50),  -- 'database', 'backend', 'frontend', 'agents', 'integration', 'polish'
+
     -- Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),
     started_at TIMESTAMPTZ,
@@ -203,6 +208,13 @@ CREATE TABLE epics (
 CREATE INDEX idx_epics_project_id ON epics(project_id);
 CREATE INDEX idx_epics_status ON epics(status);
 CREATE INDEX idx_epics_priority ON epics(priority);
+CREATE INDEX idx_epics_type ON epics(epic_type);
+CREATE INDEX idx_epics_domain ON epics(domain) WHERE domain IS NOT NULL;
+CREATE INDEX idx_epics_depends_on ON epics USING GIN (depends_on_epics);
+
+COMMENT ON COLUMN epics.epic_type IS 'Execution mode: ''parallel'' = can run with other parallel epics, ''sequential'' = must wait for depends_on epics to complete';
+COMMENT ON COLUMN epics.depends_on_epics IS 'Array of epic IDs this epic depends on. Epic cannot start until all dependencies are completed.';
+COMMENT ON COLUMN epics.domain IS 'Domain classification for epic: ''database'', ''backend'', ''frontend'', ''agents'', ''integration'', ''polish''. Used for batch grouping in parallel execution.';
 
 -- Tasks Table - Individual implementation steps
 CREATE TABLE tasks (

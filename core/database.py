@@ -1044,7 +1044,10 @@ class TaskDatabase:
         project_id: UUID,
         name: str,
         description: Optional[str] = None,
-        priority: int = 0
+        priority: int = 0,
+        epic_type: str = 'parallel',
+        domain: Optional[str] = None,
+        depends_on_epics: Optional[List[int]] = None
     ) -> Dict[str, Any]:
         """
         Create a new epic.
@@ -1054,6 +1057,9 @@ class TaskDatabase:
             name: Epic name
             description: Epic description
             priority: Epic priority (lower = higher priority)
+            epic_type: 'parallel' or 'sequential' (default: 'parallel')
+            domain: Layer domain (database/backend/frontend/agents/integration/polish)
+            depends_on_epics: List of epic IDs this epic depends on
 
         Returns:
             Created epic record
@@ -1061,11 +1067,11 @@ class TaskDatabase:
         async with self.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO epics (project_id, name, description, priority)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO epics (project_id, name, description, priority, epic_type, domain, depends_on_epics)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING *
                 """,
-                project_id, name, description, priority
+                project_id, name, description, priority, epic_type, domain, depends_on_epics or []
             )
             return dict(row)
 
@@ -1120,6 +1126,124 @@ class TaskDatabase:
                 project_id
             )
             return [dict(row) for row in rows]
+
+    async def get_epics_with_dependencies(
+        self,
+        project_id: UUID
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all epics with their dependency information for execution planning.
+
+        Returns epics with type, domain, and dependencies for parallel execution planning.
+        Epics are sorted with parallel epics first (by priority), then sequential epics
+        in topological order based on their dependencies.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            List of epic records including epic_type, domain, depends_on_epics fields
+        """
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    name,
+                    description,
+                    priority,
+                    status,
+                    epic_type,
+                    depends_on_epics,
+                    domain,
+                    created_at,
+                    started_at,
+                    completed_at
+                FROM epics
+                WHERE project_id = $1
+                ORDER BY
+                    CASE epic_type
+                        WHEN 'parallel' THEN 0
+                        WHEN 'sequential' THEN 1
+                        ELSE 2
+                    END,
+                    priority,
+                    id
+                """,
+                project_id
+            )
+            return [dict(row) for row in rows]
+
+    async def get_epic(
+        self,
+        epic_id: int,
+        project_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a single epic by ID.
+
+        Args:
+            epic_id: Epic ID
+            project_id: Project UUID
+
+        Returns:
+            Epic record or None if not found
+        """
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM epics
+                WHERE id = $1 AND project_id = $2
+                """,
+                epic_id, project_id
+            )
+            return dict(row) if row else None
+
+    async def update_epic(
+        self,
+        epic_id: int,
+        **kwargs
+    ) -> None:
+        """
+        Update epic fields.
+
+        Supports updating any epic field including epic_type, domain, and depends_on_epics.
+
+        Args:
+            epic_id: Epic ID
+            **kwargs: Fields to update (name, description, priority, status, epic_type, domain, depends_on_epics, etc.)
+
+        Raises:
+            ValueError: If invalid field names are provided
+        """
+        if not kwargs:
+            return
+
+        # Whitelist of allowed fields to prevent SQL injection
+        ALLOWED_FIELDS = {
+            'name', 'description', 'priority', 'status',
+            'epic_type', 'domain', 'depends_on_epics'
+        }
+        invalid_keys = set(kwargs.keys()) - ALLOWED_FIELDS
+        if invalid_keys:
+            raise ValueError(f"Invalid epic fields: {invalid_keys}")
+
+        set_clauses = []
+        values = []
+        param_num = 1
+
+        for key, value in kwargs.items():
+            set_clauses.append(f"{key} = ${param_num}")
+            values.append(value)
+            param_num += 1
+
+        values.append(epic_id)
+
+        query = f"UPDATE epics SET {', '.join(set_clauses)} WHERE id = ${param_num}"
+
+        async with self.acquire() as conn:
+            await conn.execute(query, *values)
 
     # =========================================================================
     # Task Operations
@@ -3092,13 +3216,13 @@ class TaskDatabase:
             async with self.acquire() as conn:
                 row = await conn.fetchrow(
                     """
-                    SELECT depends_on
+                    SELECT depends_on_epics
                     FROM epics
                     WHERE id = $1
                     """,
                     epic_id
                 )
-                return row['depends_on'] if row and row['depends_on'] else []
+                return row['depends_on_epics'] if row and row['depends_on_epics'] else []
         except Exception as e:
             logger.error(f"Failed to get epic dependencies for epic {epic_id}: {e}")
             raise
@@ -3120,7 +3244,7 @@ class TaskDatabase:
                 await conn.execute(
                     """
                     UPDATE epics
-                    SET depends_on = $2
+                    SET depends_on_epics = $2
                     WHERE id = $1
                     """,
                     epic_id, depends_on

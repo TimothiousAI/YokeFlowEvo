@@ -560,24 +560,91 @@ Your job is to analyze `app_spec.txt` and populate the database with epics.
 Based on your reading of `app_spec.txt`, identify 15-25 high-level feature areas
 (epics) that cover the entire project scope.
 
+---
+
+### Epic Design for Parallel Execution
+
+When creating epics, you MUST design for parallel execution:
+
+#### Step 1: Identify Architectural Layers
+
+Analyze the app spec and identify which layers are needed:
+- **Database Layer**: Schema, models, migrations, seeds
+- **Backend Layer**: API endpoints, services, middleware, auth
+- **Frontend Layer**: Components, pages, state management, styling
+- **Agent/AI Layer**: Prompts, tools, workflows, memory
+- **Infrastructure Layer**: Docker, CI/CD, deployment (if applicable)
+
+#### Step 2: Create One Epic Per Layer
+
+Each layer becomes ONE epic that can run in parallel:
+
+**CORRECT (Layer-centric):**
+- Epic 1: "Database Layer" - All database work
+- Epic 2: "Backend API Layer" - All API work
+- Epic 3: "Frontend UI Layer" - All UI work
+- Epic 4: "AI Agent Layer" - All AI work
+
+**INCORRECT (Feature-centric):**
+- Epic 1: "Chat Feature" - DB + API + UI + AI for chat
+- Epic 2: "Settings Feature" - DB + API + UI for settings
+- Epic 3: "Polish" - Everything
+
+#### Step 3: Define Interface Contracts FIRST
+
+Before coding tasks, create contract tasks:
+1. "Define database schema contract" (what tables/columns)
+2. "Define API contract" (what endpoints, request/response shapes)
+3. "Define component interface contract" (what props components need)
+
+#### Step 4: Tasks Code Against Contracts, Not Each Other
+
+Each task in a layer epic should:
+- Read from contract files to understand interfaces
+- Implement against the contract
+- NOT depend on actual implementation in other layers
+
+**Example Backend Task:**
+"Implement POST /api/messages endpoint per api-spec.yaml contract"
+
+**Example Frontend Task:**
+"Create ChatMessage component per component-props.ts contract"
+
+#### Step 5: Add Integration Epic LAST
+
+After all parallel layer epics, add:
+- Epic N-1: "Integration" - Wire everything together, depends on all parallel epics
+- Epic N: "Polish" - Optimization and refinement, depends on integration
+
+#### Step 6: Set Epic Metadata
+
+For each epic, specify:
+- `epic_type`: 'parallel' (default) or 'sequential'
+- `domain`: 'database', 'backend', 'frontend', 'agents', 'integration', 'polish'
+- `depends_on_epics`: Array of epic IDs this epic must wait for (only for sequential epics)
+
+---
+
 **Guidelines for creating epics:**
-- Each epic should represent a cohesive feature area
+- Each epic should represent a cohesive architectural layer (not a feature)
+- Use layer-centric design to enable true parallel execution
 - Order by priority/dependency (foundational first, polish last)
 - Cover ALL features mentioned in the spec
 - Don't make epics too granular (that's what tasks are for)
+- Not all projects need all layers (e.g., frontend-only projects)
 
-**Common epic patterns:**
-1. Project foundation & database setup (always first)
-2. API/backend integration
-3. Core UI components
-4. Main feature areas (from the spec)
-5. Secondary features
-6. Settings & configuration
-7. Search & discovery
-8. Sharing & collaboration
-9. Accessibility
-10. Responsive design / mobile
-11. Performance & polish (always last)
+**Common epic patterns (Layer-Centric Approach):**
+1. Database Layer (parallel) - Schema, models, migrations
+2. Backend API Layer (parallel) - Endpoints, services, auth
+3. Frontend UI Layer (parallel) - Components, pages, styling
+4. Agent/AI Layer (parallel) - Prompts, tools, workflows
+5. Integration Layer (sequential) - Wire layers together, E2E tests
+6. Polish Layer (sequential) - Performance, UX refinement, edge cases
+
+**Note:** For simpler projects (e.g., frontend-only), you may only need 2-3 epics:
+- Frontend UI Layer (parallel)
+- Integration Layer (sequential)
+- Polish Layer (sequential)
 
 **Insert epics using MCP tools:**
 
